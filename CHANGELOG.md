@@ -2,6 +2,14 @@
 
 Notable changes to nabz. Newest first.
 
+## v0.11.1
+
+_2026-08-30_
+
+- **nabz is open source** — the code is now public under the **AGPL-3.0** at [LytronHQ/nabz](https://github.com/LytronHQ/nabz), with a README that explains what self-hosting includes and where the hosted service fits. AGPL specifically: it is the licence that keeps a hosted fork's changes available.
+- **A self-hoster can now start from an example** — the deploy configuration ships an `example.vars` with every key commented, rather than leaving you to infer the shape from the scripts.
+- No product changes. Everything else here is repository and release plumbing: publishing each release to the public repo automatically, and a pile of dead links repointed after the rename.
+
 ## v0.11.0
 
 _2026-08-30_
