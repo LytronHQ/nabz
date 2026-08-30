@@ -1,0 +1,86 @@
+# Worker role: the worker, plus an optional local Valkey sidecar.
+# Single source of truth for what runs on a worker node.
+#
+#   docker compose --env-file /etc/monitors/worker.env -f deploy/worker.yml \
+#     --profile local-cache up -d --build
+#
+#   # N replicas on one node (#311):
+#   ... --profile local-cache up -d --scale worker=3
+#
+# For a zone spread across several VMs, drop the profile and point every node's
+# CACHE_HOST at ONE shared Valkey (deploy/valkey-zone.yml). Every worker in a zone
+# MUST share a Valkey: two Valkeys in one zone means two due-sets, two seed
+# leaders, and every monitor probed twice.
+#
+# Values come from the env file (see worker.env.example).
+name: monitors-worker
+
+services:
+  valkey:
+    # Per-node sidecar, for a zone that lives on a single VM. Turned off by
+    # omitting the profile when the zone points at a shared Valkey instead.
+    profiles: ["local-cache"]
+    image: valkey/valkey
+    restart: unless-stopped
+    volumes:
+      - valkey_data:/data
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  worker:
+    build:
+      context: ..
+      dockerfile: worker/dockerfile
+      args:
+        BUILD_VERSION: ${BUILD_VERSION:-dev}
+        BUILD_COMMIT: ${BUILD_COMMIT:-unknown}
+    restart: unless-stopped
+    # No container_name: it must stay unset for --scale to work at all, since
+    # two containers cannot share one name.
+    #
+    # No depends_on either — it would name the sidecar, and the sidecar does not
+    # exist in a shared-Valkey deployment. ConnectCacheWithRetry already blocks
+    # with backoff until Valkey answers, which covers both cases and does not
+    # depend on the cache being a local service.
+    environment:
+      - REGION_NAME=${REGION_NAME}
+      # SSRF guard (#268): true restricts checks to public IPs (the anonymous
+      # "free" zone sets this; the normal eu/us zones leave it off/blank).
+      - BLOCK_PRIVATE_TARGETS=${BLOCK_PRIVATE_TARGETS:-}
+      # Defaults to the sidecar; point at the shared zone Valkey to spread a zone
+      # across VMs. CACHE_PASSWORD is empty for the sidecar (only reachable inside
+      # this compose network) and required for a shared one.
+      - CACHE_HOST=${CACHE_HOST:-valkey}
+      - CACHE_PORT=${CACHE_PORT:-6379}
+      - CACHE_PASSWORD=${CACHE_PASSWORD:-}
+      # Ops identity only, never written to a check row. Blank means the
+      # container hostname, which is already unique per replica — so scaling
+      # needs no per-replica config.
+      - WORKER_ID=${WORKER_ID:-}
+      - PB_URL=${PB_URL}
+      - PB_AUTH_COLLECTION=${PB_AUTH_COLLECTION:-}
+      - PB_ADMIN_USERNAME=${PB_ADMIN_USERNAME}
+      - PB_ADMIN_PASSWORD=${PB_ADMIN_PASSWORD}
+      # Two-tier health endpoint (#103). HEALTH_ADDR=off disables it; a blank
+      # HEALTH_DEBUG_TOKEN keeps only the minimal public tier.
+      - HEALTH_ADDR=${HEALTH_ADDR:-:8080}
+      - HEALTH_DEBUG_TOKEN=${HEALTH_DEBUG_TOKEN:-}
+    # expose, not ports: a fixed host port allows exactly one replica, since the
+    # second would collide on it. HEALTH_PORT_RANGE publishes a range for
+    # debugging when a host port is genuinely wanted — Docker then assigns each
+    # replica its own port out of it.
+    expose:
+      - "8080"
+    ports:
+      - "${HEALTH_PORT_RANGE:-8080-8099}:8080"
+    healthcheck:
+      test: ["CMD", "/app/worker", "--health-check"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  valkey_data:

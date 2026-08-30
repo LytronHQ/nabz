@@ -1,0 +1,7 @@
+
+# Editor
+.vscode/
+
+# Local secrets (Hetzner token etc.) — never commit
+.env
+deploy/.materialized/

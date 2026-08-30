@@ -1,0 +1,98 @@
+name: deploy-web
+
+# Builds and deploys the Cloudflare Worker, and pushes its secrets. The Worker
+# cannot reach PocketBase without the Access service token, so the secrets are
+# part of the deploy rather than a step someone remembers.
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Target environment
+        type: environment
+        required: true
+  workflow_call:
+    inputs:
+      environment: { type: string, required: true }
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: app/.node-version
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - run: npm ci
+        working-directory: app
+
+      - name: Build
+        # build:cf, not build: it also runs scripts/wrap-worker.mjs, which adds the
+        # Cron Trigger handler the liveness beat needs (#339).
+        run: npm run build:cf
+        working-directory: app
+
+      - name: Deploy
+        working-directory: app
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          WRANGLER_ENV: ${{ vars.WRANGLER_ENV }}
+        run: |
+          set -euo pipefail
+          if [ -n "${WRANGLER_ENV:-}" ]; then
+            npx --yes wrangler deploy --env "$WRANGLER_ENV"
+          else
+            npx --yes wrangler deploy
+          fi
+
+      - name: Push secrets
+        working-directory: app
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          WRANGLER_ENV: ${{ vars.WRANGLER_ENV }}
+          PKCE_FLOW_ENCRYPTION_KEY: ${{ secrets.PKCE_FLOW_ENCRYPTION_KEY }}
+          WEB_PB_USERNAME: ${{ vars.WORKER_PB_USERNAME }}
+          WEB_PB_PASSWORD: ${{ secrets.WORKER_PB_PASSWORD }}
+          HEALTH_DEBUG_TOKEN: ${{ secrets.HEALTH_DEBUG_TOKEN }}
+          ADMIN_EMAILS: ${{ vars.ADMIN_EMAILS }}
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+        run: |
+          set -euo pipefail
+          for req in CF_ACCESS_CLIENT_ID CF_ACCESS_CLIENT_SECRET WEB_PB_PASSWORD; do
+            [ -n "${!req}" ] || { echo "::error::$req is empty — run infra-access / bootstrap-credentials first"; exit 1; }
+          done
+          # One bulk call rather than one round-trip per value. Piped in on
+          # stdin, so no secret reaches the process list or the log.
+          jq -nc \
+            --arg pkce "$PKCE_FLOW_ENCRYPTION_KEY" --arg u "$WEB_PB_USERNAME" \
+            --arg p "$WEB_PB_PASSWORD" --arg h "$HEALTH_DEBUG_TOKEN" \
+            --arg a "$ADMIN_EMAILS" --arg ci "$CF_ACCESS_CLIENT_ID" --arg cs "$CF_ACCESS_CLIENT_SECRET" \
+            '{PKCE_FLOW_ENCRYPTION_KEY:$pkce, WEB_PB_USERNAME:$u, WEB_PB_PASSWORD:$p,
+              HEALTH_DEBUG_TOKEN:$h, ADMIN_EMAILS:$a,
+              CF_ACCESS_CLIENT_ID:$ci, CF_ACCESS_CLIENT_SECRET:$cs}' \
+            | if [ -n "${WRANGLER_ENV:-}" ]; then npx --yes wrangler secret bulk --env "$WRANGLER_ENV"; else npx --yes wrangler secret bulk; fi
+
+      - name: Access must be in the path
+        env:
+          PB_HOSTNAME: ${{ vars.PB_HOSTNAME }}
+        run: |
+          set -euo pipefail
+          # An unauthenticated request MUST be refused. If PocketBase answers it,
+          # global_fetch_strictly_public is not in effect and every Worker request
+          # is bypassing Access — the whole design, silently off.
+          code="$(curl -s -o /dev/null -w '%{http_code}' "https://${PB_HOSTNAME}/api/health" || true)"
+          echo "unauthenticated GET https://${PB_HOSTNAME}/api/health -> $code"
+          case "$code" in
+            302|401|403) echo "Access is gating the hostname." ;;
+            200) echo "::error::PocketBase answered an UNAUTHENTICATED request. Access is not in the path."; exit 1 ;;
+            *) echo "::warning::Unexpected status $code — check the tunnel is up." ;;
+          esac

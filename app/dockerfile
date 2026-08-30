@@ -1,0 +1,25 @@
+# The SvelteKit app as a standalone Node server (adapter-node), for self-hosting
+# on a web VM (deploy/web.yml). Netlify is unaffected — it builds with adapter-auto
+# (ADAPTER unset). Runtime config (PB_URL, PKCE key, ORIGIN) is read from the
+# environment at runtime via $env/dynamic/private, so no rebuild to repoint.
+#
+# Build context is the REPO ROOT (see deploy/web.yml) so CHANGELOG.md is available
+# to the /changelog page's build-time `?raw` import.
+FROM node:22-alpine AS build
+WORKDIR /app
+COPY app/package.json app/package-lock.json ./
+RUN npm ci
+# CHANGELOG.md lives at the repo root; place it one level above the app dir so the
+# import (../../../../CHANGELOG.md, from app/src/lib/server/) resolves to it.
+COPY CHANGELOG.md /CHANGELOG.md
+COPY app/ ./
+RUN ADAPTER=node npm run build && npm prune --omit=dev
+
+FROM node:22-alpine
+WORKDIR /app
+ENV HOST=0.0.0.0 PORT=3000
+COPY --from=build /app/build ./build
+COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/package.json ./package.json
+EXPOSE 3000
+CMD ["node", "build"]

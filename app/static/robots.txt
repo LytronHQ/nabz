@@ -1,0 +1,19 @@
+# nabz — https://nabz.sh
+# The marketing surface (landing, changelog) is crawlable; app internals, the
+# machine endpoints, and the anonymous try-it flow are not.
+
+User-agent: *
+Allow: /$
+Allow: /changelog
+Disallow: /api/
+Disallow: /ping/
+Disallow: /auth/
+Disallow: /admin/
+Disallow: /signin
+Disallow: /account
+Disallow: /dashboard
+Disallow: /monitors
+Disallow: /incidents
+Disallow: /alerts
+Disallow: /escalations
+Disallow: /try/

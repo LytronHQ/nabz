@@ -1,0 +1,93 @@
+name: infra-access
+
+# Creates the Access application, its Service Auth policy and the service token
+# the Worker authenticates with, then stores the token halves.
+#
+# Cloudflare returns a service token's secret only at creation. A re-run against
+# an existing token therefore stores nothing new — use rotate_token to mint a
+# fresh pair, which invalidates the old one until deploy-web runs.
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Target environment
+        type: environment
+        required: true
+      rotate_token:
+        description: Mint a new service-token secret (invalidates the current one)
+        type: boolean
+        default: false
+  workflow_call:
+    inputs:
+      environment: { type: string, required: true }
+
+permissions:
+  contents: read
+
+jobs:
+  access:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create or update the Access application
+        env:
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          ACCESS_HOSTNAME: ${{ vars.PB_HOSTNAME }}
+          APP_NAME: ${{ vars.ACCESS_APP_NAME }}
+          ROTATE_TOKEN: ${{ inputs.rotate_token && '1' || '0' }}
+          GH_TOKEN: ${{ secrets.GH_SECRETS_PAT }}
+          ENV_NAME: ${{ inputs.environment }}
+        run: |
+          set -uo pipefail
+          # NOT `set -e` around this call, and not a bare command substitution:
+          # access.sh emits a freshly minted service-token secret on every exit
+          # path, including failure, because Cloudflare returns it exactly once.
+          # Aborting here on a non-zero status would discard the one copy that
+          # exists and permanently burn the token — the failure mode this is
+          # written to prevent. Capture first, store second, fail last.
+          rc=0
+          out="$(./deploy/cloudflare/access.sh)" || rc=$?
+          id="$(printf '%s\n' "$out" | sed -n 's/^CF_ACCESS_CLIENT_ID=//p')"
+          secret="$(printf '%s\n' "$out" | sed -n 's/^CF_ACCESS_CLIENT_SECRET=//p')"
+          if [ -z "$id" ]; then
+            # No id and a failure means it died before minting: nothing to
+            # preserve, and rc is the useful error rather than "no client id".
+            [ "$rc" = "0" ] || { echo "::error::access.sh failed (exit $rc) — see the log above"; exit "$rc"; }
+            echo "::error::no client id returned"; exit 1
+          fi
+          gh secret set CF_ACCESS_CLIENT_ID --env "$ENV_NAME" --repo "${{ github.repository }}" --body "$id"
+          if [ -n "$secret" ]; then
+            gh secret set CF_ACCESS_CLIENT_SECRET --env "$ENV_NAME" --repo "${{ github.repository }}" --body "$secret"
+            echo "service token stored (new secret) — run deploy-web to push it to the Worker"
+          elif [ "$rc" != "0" ]; then
+            # Failed before minting anything: nothing to preserve, just report.
+            echo "::error::access.sh failed (exit $rc) — see the log above"
+            exit "$rc"
+          else
+            # "Unchanged" is only reassuring when there IS a stored secret. On a
+            # first run against a pre-existing token there is nothing to leave
+            # unchanged: the id gets stored, the secret never does, and this step
+            # reports success while leaving the pair half-written — deploy-web
+            # then fails several minutes later, pointing at itself.
+            if gh secret list --env "$ENV_NAME" --repo "${{ github.repository }}" \
+                 --json name -q '.[].name' | grep -qx CF_ACCESS_CLIENT_SECRET; then
+              echo "existing service token reused; its secret is not retrievable, so the stored one is unchanged"
+            else
+              echo "::error::Reused an existing Access service token, but no CF_ACCESS_CLIENT_SECRET is stored."
+              echo "::error::Cloudflare returns a service token secret only at creation, so the stored"
+              echo "::error::half can never be recovered — re-run this workflow with rotate_token=true"
+              echo "::error::to mint a fresh pair."
+              exit 1
+            fi
+          fi
+
+          # The credential is safe now; surface the original failure.
+          if [ "$rc" != "0" ]; then
+            echo "::error::access.sh exited $rc after the service token was stored."
+            echo "::error::The secret above was preserved — re-run to finish the remaining steps."
+            exit "$rc"
+          fi

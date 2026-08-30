@@ -1,0 +1,14 @@
+{
+	"name": "monitors-e2e",
+	"version": "0.0.0",
+	"private": true,
+	"description": "End-to-end suite for monitors — real stack, no mocks (#126)",
+	"scripts": {
+		"test": "playwright test",
+		"stack:up": "bash setup.sh up",
+		"stack:down": "bash setup.sh down"
+	},
+	"devDependencies": {
+		"@playwright/test": "^1.45.2"
+	}
+}

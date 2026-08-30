@@ -1,0 +1,11 @@
+{
+	"name": "monitors-e2e-fixture",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"description": "Deterministic HTTP/TCP target server for the monitors e2e suite (#126)",
+	"scripts": {
+		"start": "node server.mjs",
+		"test": "node --test"
+	}
+}

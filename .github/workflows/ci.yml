@@ -1,0 +1,109 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# The coverage job rewrites the README badges and pushes back to main.
+permissions:
+  contents: write
+
+jobs:
+  app:
+    name: app (vitest)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - run: npm ci
+      - run: npm run check
+      - run: npx vitest run --coverage
+      - name: Coverage → summary
+        if: always()
+        run: |
+          if [ -f coverage/coverage-summary.json ]; then
+            node -e 'const t=require("./coverage/coverage-summary.json").total; console.log(`### app coverage\n- lines **${t.lines.pct}%** · statements ${t.statements.pct}% · functions ${t.functions.pct}% · branches ${t.branches.pct}%`)' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "### app coverage\n_(no coverage — tests did not complete)_" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  go:
+    name: go (${{ matrix.module }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        module: [corelib, worker, evaluator]
+    defaults:
+      run:
+        working-directory: ${{ matrix.module }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22.5'
+          cache-dependency-path: ${{ matrix.module }}/go.sum
+      - run: go test ./... -coverprofile=cover.out
+      - name: Coverage → summary
+        if: always()
+        run: |
+          echo "### ${{ matrix.module }} coverage" >> "$GITHUB_STEP_SUMMARY"
+          go tool cover -func=cover.out | awk '/^total:/{print "- total **"$3"**"}' >> "$GITHUB_STEP_SUMMARY"
+
+  # pbbench has no tests and no dependencies, so it does not fit the coverage
+  # matrix — but 480 lines that nothing compiles can rot silently, and the sizing
+  # work in #331 expects to re-run it. Build and vet only.
+  bench:
+    name: go (pbbench)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22.5'
+      - working-directory: benchmarks/pbbench
+        run: |
+          go build -o /dev/null .
+          go vet ./...
+
+  # On merge to main, recompute coverage and rewrite the README's shields badges in
+  # place (the repo is private, so shields can't read a data branch — static badges
+  # baked into the README work for anyone). Commits back only when a number changed.
+  coverage:
+    name: refresh coverage badges
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [app, go, bench]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22.5'
+      - name: Install app deps
+        working-directory: app
+        run: npm ci
+      - name: Regenerate README coverage badges
+        run: GO=go bash scripts/coverage.sh --write
+      - name: Commit if changed
+        run: |
+          if git -c core.fileMode=false diff --quiet README.md; then
+            echo "coverage badges unchanged"
+          else
+            git -c commit.gpgsign=false \
+                -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+                -c user.name="github-actions[bot]" \
+                commit -m "chore(ci): refresh coverage badges [skip ci]" README.md
+            git push origin HEAD:main
+          fi

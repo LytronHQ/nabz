@@ -1,0 +1,1388 @@
+@import 'tailwindcss';
+
+/* Tailwind 4 is CSS-first, but the whole Blueprint palette, the token colour
+   aliases and the Inter/Space Grotesk stacks live in tailwind.config.js. Keeping
+   them there via @config is deliberate: porting ~90 colour entries into @theme
+   would be a re-typing exercise with a visual regression behind every typo, and
+   this migration is meant to be behaviour-preserving. */
+@config '../tailwind.config.js';
+
+/* The forms plugin has to be declared here, not in the JS config's `plugins`
+   array. Under @config, v4 silently ignored it: the generated CSS lost base
+   styling for [type=checkbox], [type=radio], text inputs, select:not([size]) and
+   [multiple] — 18 form-control rules down to 8 — so every checkbox and select in
+   the app would have fallen back to the browser's native look. */
+@plugin '@tailwindcss/forms' {
+	strategy: base;
+}
+
+/* v4 dropped `darkMode: 'class'` from the JS config in favour of a custom
+   variant. Same selector semantics as before: `.dark` on <html> (appearance.ts
+   sets it) and anything inside it. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+@layer base {
+	/* Tailwind 4's preflight dropped `button, [role=button] { cursor: pointer }`
+	   and now leaves buttons on the UA default. 41 buttons in this app carry no
+	   .btn class — the sidebar burger, the theme switcher, list row actions — and
+	   every one of them silently lost its pointer cursor on hover. Restored
+	   verbatim from what v3 emitted, in the base layer so utilities still win. */
+	button,
+	[role='button'] {
+		cursor: pointer;
+	}
+
+	/* v3's preflight paired the rule above with this one, and v4 dropped both.
+	   Without it the 20 disabled buttons in the app would show a pointer, which
+	   reads as "clickable" on a control that is not. */
+	:disabled {
+		cursor: default;
+	}
+
+	/* v3's preflight also reset this and v4 does not, so a control inside an
+	   uppercased ancestor now inherits the uppercase. `.field label` is uppercased
+	   and alert-channels/form has a <select> inside one, so this is live, not
+	   theoretical. */
+	button,
+	select {
+		text-transform: none;
+	}
+}
+
+/* Self-hosted fonts (no runtime CDN). "Blueprint" (#197): Inter for EVERYTHING —
+   headings, body, labels, buttons, URLs/host:port, small inline numbers; Space Grotesk
+   ONLY for prominent stat numbers (KPI values, uptime %, response times, dates) with
+   tabular-nums. No monospace. Both variable woff2, font-display: swap. */
+@font-face {
+	font-family: 'InterVariable';
+	font-style: normal;
+	font-weight: 100 900;
+	font-display: swap;
+	src: url('/fonts/InterVariable.woff2') format('woff2');
+}
+@font-face {
+	font-family: 'InterVariable';
+	font-style: italic;
+	font-weight: 100 900;
+	font-display: swap;
+	src: url('/fonts/InterVariable-Italic.woff2') format('woff2');
+}
+@font-face {
+	font-family: 'Space Grotesk';
+	font-style: normal;
+	font-weight: 400 700;
+	font-display: swap;
+	src: url('/fonts/SpaceGrotesk.woff2') format('woff2');
+}
+
+/* ============================================================
+   Design tokens — "Blueprint" system (#197, supersedes v4/#178).
+   Engineering-drawing feel: hairline + dashed borders, tight corners,
+   NO shadows/glow, petrol brand (green/red reserved strictly for
+   status), compact/dense. Semantic tokens only; both light + dark flow
+   from the same names (only values differ). Legacy v4 names are aliased
+   to the Blueprint tokens (bottom of :root) so existing components
+   reskin during the incremental migration; components adopt the new
+   names + shapes in later layers.
+   ============================================================ */
+:root {
+	/* --- brand (petrol; overridden by the accent picker via [data-accent]) --- */
+	--brand: #123b40;
+	--brand-contrast: #ffffff;
+
+	/* --- status (LOCKED — never brand, never touched by the accent picker) --- */
+	--status-up: #2c8155;
+	--status-up-wash: #e3f3ea;
+	--status-down: #c0453f;
+	--status-down-wash: #f7e6e5;
+	--status-paused: #7c818b;
+	--status-paused-wash: #eef1f1;
+	--status-pending: #b08900;
+	--status-pending-wash: #f6efd6;
+
+	/* --- surfaces & structure --- */
+	--bg: #ecf0f1;
+	--surface-1: #ffffff;
+	--surface-2: #f6fafa;
+	--border: #cdd8d9;
+	--border-dashed: #dce4e5;
+	--border-inner: #e3e9ea;
+
+	/* --- text --- */
+	--text-primary: #1f3a3d;
+	--text-secondary: #556a6d;
+	--text-muted: #839497;
+	--text-faint: #a0adae;
+
+	/* Request-phase palette (DNS · Connect · TLS · Transfer). Fixed, independent. */
+	--phase-dns: #245e66;
+	--phase-connect: #63a9a2;
+	--phase-tls: #f59e0b;
+	--phase-transfer: #10b981;
+
+	/* Blueprint has NO shadows — depth is borders + the bg/surface step. These are a
+     transitional value so v4 cards stay visible until layer 2 flips them to hairline
+     borders (then set to `none`). */
+	--shadow: none; /* Blueprint has no shadows — depth is borders + bg/surface step */
+	--shadow-strong: none;
+
+	/* --- theme-independent: tight corners, spacing, fonts, derived brand tints --- */
+	--radius: 4px; /* cards */
+	--radius-btn: 3px; /* buttons, inputs */
+	--radius-pill: 3px; /* pills, badges, tags */
+	--space-1: 4px;
+	--space-2: 8px;
+	--space-3: 12px;
+	--space-4: 16px;
+	--space-5: 20px;
+	--space-6: 24px;
+	--font-stat: 'Space Grotesk', 'InterVariable', system-ui, -apple-system, sans-serif;
+	/* Derived so they follow the picked accent (theme-tuned via --brand/surface/text). */
+	--brand-muted: color-mix(in srgb, var(--brand) 55%, var(--text-muted));
+	--brand-wash: color-mix(in srgb, var(--brand) 11%, var(--surface-1));
+
+	/* --- legacy v4 aliases → Blueprint tokens (transitional; resolve per theme) --- */
+	--ground: var(--bg);
+	--surface: var(--surface-1);
+	--inset: var(--surface-2);
+	--border-strong: var(--border);
+	--ink: var(--text-primary);
+	--ink-2: var(--text-secondary);
+	--ink-3: var(--text-muted);
+	--ink-4: var(--text-faint);
+	--accent: var(--brand);
+	--accent-strong: var(--brand);
+	--accent-wash: var(--brand-wash);
+	--up: var(--status-up);
+	--up-wash: var(--status-up-wash);
+	--down: var(--status-down);
+	--down-wash: var(--status-down-wash);
+	--pending: var(--status-pending);
+	--pending-wash: var(--status-pending-wash);
+	--paused: var(--status-paused);
+	--paused-wash: var(--status-paused-wash);
+}
+@media (prefers-color-scheme: dark) {
+	:root {
+		--brand: #3f9d97;
+		--brand-contrast: #0d1f22;
+		--status-up: #4ade80;
+		--status-up-wash: #14301f;
+		--status-down: #f0653f;
+		--status-down-wash: #3a1613;
+		--status-paused: #8a8f99;
+		--status-paused-wash: #242b2c;
+		--status-pending: #e0b429;
+		--status-pending-wash: #33290a;
+		--bg: #0f1719;
+		--surface-1: #16211f;
+		--surface-2: #1b2725;
+		--border: #2b3a38;
+		--border-dashed: #243230;
+		--border-inner: #20302d;
+		--text-primary: #e6efee;
+		--text-secondary: #a8bbb9;
+		--text-muted: #6f8583;
+		--text-faint: #566a68;
+		--phase-dns: #4a9ca3;
+		--phase-connect: #86c5be;
+		--phase-tls: #d97706;
+		--phase-transfer: #059669;
+		--shadow: none;
+		--shadow-strong: none;
+	}
+}
+:root[data-theme='light'],
+.theme-light {
+	--brand: #123b40;
+	--brand-contrast: #ffffff;
+	--status-up: #2c8155;
+	--status-up-wash: #e3f3ea;
+	--status-down: #c0453f;
+	--status-down-wash: #f7e6e5;
+	--status-paused: #7c818b;
+	--status-paused-wash: #eef1f1;
+	--status-pending: #b08900;
+	--status-pending-wash: #f6efd6;
+	--bg: #ecf0f1;
+	--surface-1: #ffffff;
+	--surface-2: #f6fafa;
+	--border: #cdd8d9;
+	--border-dashed: #dce4e5;
+	--border-inner: #e3e9ea;
+	--text-primary: #1f3a3d;
+	--text-secondary: #556a6d;
+	--text-muted: #839497;
+	--text-faint: #a0adae;
+	--phase-dns: #245e66;
+	--phase-connect: #63a9a2;
+	--phase-tls: #f59e0b;
+	--phase-transfer: #10b981;
+	--shadow: none;
+	--shadow-strong: none;
+}
+:root[data-theme='dark'],
+.theme-dark {
+	--brand: #3f9d97;
+	--brand-contrast: #0d1f22;
+	--status-up: #4ade80;
+	--status-up-wash: #14301f;
+	--status-down: #f0653f;
+	--status-down-wash: #3a1613;
+	--status-paused: #8a8f99;
+	--status-paused-wash: #242b2c;
+	--status-pending: #e0b429;
+	--status-pending-wash: #33290a;
+	--bg: #0f1719;
+	--surface-1: #16211f;
+	--surface-2: #1b2725;
+	--border: #2b3a38;
+	--border-dashed: #243230;
+	--border-inner: #20302d;
+	--text-primary: #e6efee;
+	--text-secondary: #a8bbb9;
+	--text-muted: #6f8583;
+	--text-faint: #566a68;
+	--phase-dns: #4a9ca3;
+	--phase-connect: #86c5be;
+	--phase-tls: #d97706;
+	--phase-transfer: #059669;
+	--shadow: none;
+	--shadow-strong: none;
+}
+
+/* Accent presets — override --brand only (never --status-*). Petrol is the
+   theme-aware default (in the theme blocks above); the rest are single-value hues.
+   --brand-contrast/-muted/-wash follow from --brand. */
+:root[data-accent='teal'] {
+	--brand: #0d9488;
+}
+:root[data-accent='blue'] {
+	--brand: #2563eb;
+}
+:root[data-accent='indigo'] {
+	--brand: #4f46e5;
+}
+:root[data-accent='violet'] {
+	--brand: #7c3aed;
+}
+:root[data-accent='rose'] {
+	--brand: #e11d48;
+}
+/* Alternate accents brighten in dark (like petrol) so the dark --brand-contrast text
+   passes AA on them and they stay visible on the dark surface. */
+@media (prefers-color-scheme: dark) {
+	:root:not([data-theme='light'])[data-accent='teal'] {
+		--brand: #2dd4bf;
+	}
+	:root:not([data-theme='light'])[data-accent='blue'] {
+		--brand: #60a5fa;
+	}
+	:root:not([data-theme='light'])[data-accent='indigo'] {
+		--brand: #818cf8;
+	}
+	:root:not([data-theme='light'])[data-accent='violet'] {
+		--brand: #a78bfa;
+	}
+	:root:not([data-theme='light'])[data-accent='rose'] {
+		--brand: #fb7185;
+	}
+}
+:root[data-theme='dark'][data-accent='teal'] {
+	--brand: #2dd4bf;
+}
+:root[data-theme='dark'][data-accent='blue'] {
+	--brand: #60a5fa;
+}
+:root[data-theme='dark'][data-accent='indigo'] {
+	--brand: #818cf8;
+}
+:root[data-theme='dark'][data-accent='violet'] {
+	--brand: #a78bfa;
+}
+:root[data-theme='dark'][data-accent='rose'] {
+	--brand: #fb7185;
+}
+
+@layer base {
+	html {
+		font-size: 16px;
+	}
+	body {
+		@apply font-sans;
+		background: var(--ground);
+		color: var(--ink);
+		-webkit-font-smoothing: antialiased;
+		/* Nothing bleeds past the screen edge (#189); internal overflow-x:auto
+       scrollers — e.g. data tables — still scroll within their card. */
+		overflow-x: hidden;
+	}
+	:focus-visible {
+		outline: 2px solid var(--accent);
+		outline-offset: 2px;
+		border-radius: 4px;
+	}
+	h1,
+	h2,
+	h3 {
+		letter-spacing: -0.02em;
+		text-wrap: balance;
+	}
+	a {
+		color: var(--accent-strong);
+	}
+}
+
+/* ============================================================
+   Component layer — the concept's design system, app-wide.
+   ============================================================ */
+@layer components {
+	.mono {
+		@apply font-mono;
+		font-variant-numeric: tabular-nums;
+		overflow-wrap: anywhere;
+	}
+	.num {
+		font-family: var(--font-stat);
+		font-variant-numeric: tabular-nums;
+		letter-spacing: -0.01em;
+	}
+	.eyebrow {
+		@apply font-mono uppercase;
+		font-size: 11px;
+		letter-spacing: 0.14em;
+		color: var(--ink-3);
+	}
+
+	/* ---- app shell (responsive: sidebar ↔ off-canvas drawer, #189) ---- */
+	.app-shell {
+		display: grid;
+		grid-template-columns: 224px 1fr;
+		height: 100vh;
+	}
+	.app-main {
+		overflow-y: auto;
+		background: var(--ground);
+		padding: 22px 26px 40px;
+	}
+	.app-main > .stack {
+		display: flex;
+		flex-direction: column;
+		gap: 20px;
+		max-width: 1200px;
+		margin: 0 auto;
+	}
+
+	.side {
+		border-right: 1px solid var(--border);
+		background: var(--surface);
+		padding: 18px 14px;
+		display: flex;
+		flex-direction: column;
+		gap: 22px;
+		overflow-y: auto;
+	}
+
+	/* Mobile top bar + drawer backdrop: hidden on desktop, shown below the breakpoint. */
+	.app-topbar {
+		display: none;
+	}
+	.app-backdrop {
+		display: none;
+	}
+
+	@media (max-width: 1023.98px) {
+		/* Below the breakpoint the document scrolls (no inner overflow column) and the
+       sidebar leaves the flow to become a fixed off-canvas drawer, opened from the
+       top bar's hamburger. */
+		.app-shell {
+			display: block;
+			height: auto;
+		}
+		.app-main {
+			overflow-y: visible;
+			height: auto;
+			padding: 16px 14px 32px;
+		}
+
+		/* Below modals (z-30) and the drawer (z-55/60) so overlays cover it — sits just
+       above page content. */
+		.app-topbar {
+			display: flex;
+			align-items: center;
+			gap: 10px;
+			position: sticky;
+			top: 0;
+			z-index: 20;
+			background: var(--surface);
+			border-bottom: 1px solid var(--border);
+			padding: 9px 12px;
+		}
+		.app-burger {
+			display: inline-grid;
+			place-items: center;
+			width: 40px;
+			height: 40px;
+			flex: 0 0 40px;
+			border: 1px solid var(--border-strong);
+			border-radius: var(--radius-btn);
+			background: var(--surface);
+			color: var(--ink-2);
+			cursor: pointer;
+		}
+		.app-burger svg {
+			width: 20px;
+			height: 20px;
+		}
+		.app-burger:hover {
+			background: var(--surface-2);
+			color: var(--ink);
+		}
+
+		.side {
+			position: fixed;
+			top: 0;
+			left: 0;
+			z-index: 60;
+			height: 100vh;
+			height: 100dvh;
+			width: min(84vw, 288px);
+			transform: translateX(-100%);
+			transition: transform 0.25s ease;
+			box-shadow: var(--shadow-strong);
+		}
+		.app-shell.nav-open .side {
+			transform: translateX(0);
+		}
+
+		.app-backdrop {
+			display: block;
+			position: fixed;
+			inset: 0;
+			z-index: 55;
+			border: 0;
+			background: rgba(10, 12, 18, 0.45);
+			opacity: 0;
+			pointer-events: none;
+			transition: opacity 0.25s ease;
+		}
+		.app-shell.nav-open .app-backdrop {
+			opacity: 1;
+			pointer-events: auto;
+		}
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.side,
+		.app-backdrop {
+			transition: none;
+		}
+	}
+	.brand {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		padding: 4px 8px;
+		text-decoration: none;
+		color: var(--ink);
+	}
+	.brand .mark {
+		width: 26px;
+		height: 26px;
+		border-radius: 8px;
+		flex: 0 0 26px;
+		background: linear-gradient(150deg, var(--accent), var(--accent-strong));
+		display: grid;
+		place-items: center;
+	}
+	.brand .mark svg {
+		width: 15px;
+		height: 15px;
+	}
+	.brand b {
+		font-size: 14.5px;
+		letter-spacing: -0.01em;
+	}
+	.nav {
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+	}
+	.nav a {
+		display: flex;
+		align-items: center;
+		gap: 11px;
+		padding: 9px 11px;
+		border-radius: 9px;
+		color: var(--ink-2);
+		text-decoration: none;
+		font-size: 13.5px;
+		font-weight: 480;
+	}
+	.nav a svg {
+		width: 16px;
+		height: 16px;
+		opacity: 0.85;
+		flex: 0 0 16px;
+	}
+	.nav a:hover {
+		background: var(--surface-2);
+		color: var(--ink);
+	}
+	.nav a.active {
+		background: var(--accent-wash);
+		color: var(--accent-strong);
+		font-weight: 580;
+	}
+	.nav a.active svg {
+		opacity: 1;
+	}
+	.side__foot {
+		margin-top: auto;
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+		border-top: 1px solid var(--border);
+		padding-top: 8px;
+	}
+	.side__user {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		padding: 8px;
+		border-top: 1px solid var(--border);
+	}
+	.avatar {
+		width: 28px;
+		height: 28px;
+		border-radius: 50%;
+		flex: 0 0 28px;
+		background: conic-gradient(from 200deg, var(--accent), var(--up), var(--pending));
+	}
+	.side__user .who {
+		font-size: 12.5px;
+		line-height: 1.25;
+		overflow: hidden;
+	}
+	.side__user .who b {
+		font-weight: 560;
+	}
+	.side__user .who span {
+		display: block;
+		color: var(--ink-3);
+		@apply font-mono;
+		font-size: 11px;
+		text-overflow: ellipsis;
+		overflow: hidden;
+		white-space: nowrap;
+	}
+
+	/* ---- page header / toolbar ---- */
+	.page-head {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 16px;
+		flex-wrap: wrap;
+	}
+	.page-head h1 {
+		font-size: 22px;
+	}
+	.page-head .sub {
+		color: var(--ink-3);
+		font-size: 12.5px;
+		margin-top: 3px;
+	}
+	.toolbar {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		flex-wrap: wrap;
+	}
+	.seg {
+		display: flex;
+		background: var(--surface-2);
+		border: 1px solid var(--border);
+		border-radius: var(--radius-btn);
+		padding: 3px;
+		gap: 2px;
+	}
+	.seg button,
+	.seg a {
+		@apply font-mono;
+		font-size: 12px;
+		border: 0;
+		background: transparent;
+		color: var(--ink-3);
+		padding: 5px 11px;
+		border-radius: var(--radius-pill);
+		cursor: pointer;
+		text-decoration: none;
+	}
+	.seg button.on,
+	.seg a.on {
+		background: var(--surface);
+		color: var(--ink);
+		box-shadow: var(--shadow);
+	}
+
+	.btn {
+		display: inline-flex;
+		align-items: center;
+		gap: 7px;
+		font-size: 13px;
+		font-weight: 560;
+		border-radius: var(--radius-btn);
+		padding: 8px 14px;
+		cursor: pointer;
+		border: 1px solid transparent;
+		text-decoration: none;
+		line-height: 1;
+	}
+	.btn svg {
+		width: 15px;
+		height: 15px;
+	}
+	/* Solid accent — flat, no colored glow (v4). */
+	.btn-primary {
+		background: var(--brand);
+		color: var(--brand-contrast);
+	}
+	.btn-primary:hover {
+		filter: brightness(1.06);
+	}
+	.btn-ghost {
+		background: var(--surface);
+		border-color: var(--border);
+		color: var(--text-secondary);
+	}
+	.btn-ghost:hover {
+		background: var(--surface-2);
+		color: var(--ink);
+	}
+
+	/* ---- cards ---- */
+	/* Soft neutral shadow is the primary separator (v4) — not a border. */
+	.card {
+		background: var(--surface);
+		border: 1px solid var(--border);
+		border-radius: var(--radius);
+		min-width: 0;
+	}
+	.card__h {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		padding: 14px 16px;
+		border-bottom: 1px solid var(--border);
+	}
+	.card__h h3 {
+		font-size: 13.5px;
+		font-weight: 600;
+		letter-spacing: -0.01em;
+		color: var(--brand);
+	}
+	.card__h .hint {
+		font-size: 11px;
+		color: var(--ink-3);
+	}
+
+	/* ---- stat tile ---- */
+	.stat {
+		padding: 15px 16px;
+		position: relative;
+		overflow: hidden;
+	}
+	.stat .label {
+		@apply font-mono uppercase;
+		font-size: 10.5px;
+		letter-spacing: 0.13em;
+		color: var(--ink-3);
+	}
+	.stat .value {
+		font-family: var(--font-stat);
+		font-variant-numeric: tabular-nums;
+		font-size: 30px;
+		letter-spacing: -0.02em;
+		margin-top: 8px;
+		line-height: 1;
+	}
+	.stat .value small {
+		font-size: 15px;
+		color: var(--ink-3);
+		letter-spacing: 0;
+	}
+	.stat .delta {
+		font-size: 11.5px;
+		margin-top: 8px;
+		display: flex;
+		align-items: center;
+		gap: 6px;
+	}
+	.stat .spark {
+		position: absolute;
+		right: 14px;
+		bottom: 12px;
+		width: 86px;
+		height: 30px;
+		opacity: 0.9;
+	}
+
+	/* Emphasis StatCard (#197): one KPI stands out. Light = brand-filled (pops on the
+     light page). Dark = a filled dark card wouldn't pop, so flip to a surface with a
+     --brand left-accent + --brand number (keep the emphasis, change the mechanism). */
+	.stat.emphasis {
+		background: var(--brand);
+		border-color: var(--brand);
+	}
+	.stat.emphasis .label,
+	.stat.emphasis .value,
+	.stat.emphasis .value small,
+	.stat.emphasis .delta {
+		color: var(--brand-contrast);
+	}
+	.stat.emphasis .value small,
+	.stat.emphasis .delta {
+		opacity: 0.78;
+	}
+	:root[data-theme='dark'] .stat.emphasis,
+	.theme-dark .stat.emphasis {
+		background: var(--surface);
+		border-color: var(--border);
+		border-left: 2px solid var(--brand);
+	}
+	:root[data-theme='dark'] .stat.emphasis .label,
+	.theme-dark .stat.emphasis .label {
+		color: var(--text-muted);
+	}
+	:root[data-theme='dark'] .stat.emphasis .value,
+	.theme-dark .stat.emphasis .value {
+		color: var(--brand);
+	}
+	:root[data-theme='dark'] .stat.emphasis .value small,
+	.theme-dark .stat.emphasis .value small,
+	:root[data-theme='dark'] .stat.emphasis .delta,
+	.theme-dark .stat.emphasis .delta {
+		color: var(--text-muted);
+		opacity: 1;
+	}
+	@media (prefers-color-scheme: dark) {
+		:root:not([data-theme='light']) .stat.emphasis {
+			background: var(--surface);
+			border-color: var(--border);
+			border-left: 2px solid var(--brand);
+		}
+		:root:not([data-theme='light']) .stat.emphasis .label {
+			color: var(--text-muted);
+		}
+		:root:not([data-theme='light']) .stat.emphasis .value {
+			color: var(--brand);
+		}
+		:root:not([data-theme='light']) .stat.emphasis .value small,
+		:root:not([data-theme='light']) .stat.emphasis .delta {
+			color: var(--text-muted);
+			opacity: 1;
+		}
+	}
+
+	.up-txt {
+		color: var(--up);
+	}
+	.down-txt {
+		color: var(--down);
+	}
+	.pending-txt {
+		color: var(--pending);
+	}
+	.mut {
+		color: var(--ink-3);
+	}
+
+	/* ---- status pill ---- */
+	.pill {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		font-size: 11.5px;
+		font-weight: 550;
+		padding: 3px 9px 3px 8px;
+		border-radius: var(--radius-pill);
+		white-space: nowrap;
+	}
+	.pill .glyph {
+		width: 7px;
+		height: 7px;
+		border-radius: 50%;
+		box-shadow: 0 0 0 3px var(--_wash);
+		flex: 0 0 7px;
+	}
+	.pill.up {
+		color: var(--up);
+		background: var(--up-wash);
+		--_wash: var(--up-wash);
+	}
+	.pill.up .glyph {
+		background: var(--up);
+	}
+	.pill.down {
+		color: var(--down);
+		background: var(--down-wash);
+		--_wash: var(--down-wash);
+	}
+	.pill.down .glyph {
+		background: var(--down);
+	}
+	.pill.pend {
+		color: var(--pending);
+		background: var(--pending-wash);
+		--_wash: var(--pending-wash);
+	}
+	.pill.pend .glyph {
+		background: var(--pending);
+	}
+	.pill.paused {
+		color: var(--paused);
+		background: var(--paused-wash);
+		--_wash: var(--paused-wash);
+	}
+	.pill.paused .glyph {
+		background: var(--paused);
+		border-radius: 1px;
+	}
+	/* Rate-limited / blocked (429/403): cautionary amber, distinct square glyph. */
+	.pill.rate {
+		color: var(--pending);
+		background: var(--pending-wash);
+		--_wash: var(--pending-wash);
+	}
+	.pill.rate .glyph {
+		background: var(--pending);
+		border-radius: 2px;
+	}
+	/* Maintenance window active: neutral accent, alerts suppressed. */
+	.pill.maint {
+		color: var(--accent-strong);
+		background: var(--accent-wash);
+		--_wash: var(--accent-wash);
+	}
+	.pill.maint .glyph {
+		background: var(--accent);
+		border-radius: 2px;
+	}
+	/* Acknowledged incident — accent-toned. */
+	.pill.ack {
+		color: var(--accent-strong);
+		background: var(--accent-wash);
+		--_wash: var(--accent-wash);
+	}
+	.pill.ack .glyph {
+		background: var(--accent-strong);
+	}
+	.pill.live .glyph {
+		animation: livepulse 2s ease-in-out infinite;
+	}
+	/* currentColor, NOT --_wash. Each .pill.<tone> sets `color` to the strong tone
+	   colour and `background` to the wash — so a ring drawn in --_wash is the
+	   pill's own background colour painted onto itself. Sampling the computed
+	   box-shadow across a cycle gave rgba(227,243,234,α) on a rgb(227,243,234)
+	   background: the animation ran correctly and could not be seen, for any
+	   status, ever (#402).
+	   currentColor resolves to the tone colour in both themes with no new tokens.
+
+	   A plain colour, not color-mix(): a color-mix() start paired with the
+	   `transparent` keyword does not interpolate in Chromium — sampling showed the
+	   shadow snapping between the two keyframes with no values in between, which
+	   is a blink rather than a pulse. Plain currentColor -> transparent
+	   interpolates smoothly, which is what the original did correctly. */
+	@keyframes livepulse {
+		0% {
+			box-shadow: 0 0 0 0 currentColor;
+		}
+		70%,
+		100% {
+			box-shadow: 0 0 0 6px transparent;
+		}
+	}
+
+	/* ---- data tables ---- */
+	/* A readable floor so multi-column tables scroll within their overflow-x:auto card
+     on a phone (scroll-in-card, #189) instead of squishing columns to unreadable
+     widths. Inert on wider screens, where the table is narrower than the container. */
+	.data-table {
+		width: 100%;
+		min-width: 520px;
+		border-collapse: collapse;
+		font-size: 13px;
+	}
+	.data-table thead th {
+		text-align: left;
+		@apply uppercase;
+		font-weight: 600;
+		font-size: 10.5px;
+		letter-spacing: 0.09em;
+		color: var(--text-muted);
+		padding: 9px 14px;
+		border-bottom: 1px solid var(--border);
+	}
+	.data-table tbody td {
+		padding: 10px 14px;
+		border-bottom: 1px dashed var(--border-dashed);
+		vertical-align: middle;
+	}
+	.data-table tbody tr:last-child td {
+		border-bottom: 0;
+	}
+	.data-table tbody tr:hover td {
+		background: var(--surface-2);
+	}
+	.data-table td.r,
+	.data-table th.r {
+		text-align: right;
+	}
+	.val {
+		font-family: var(--font-stat);
+		font-variant-numeric: tabular-nums;
+	}
+	.m-name {
+		font-weight: 560;
+		font-size: 13.5px;
+	}
+	.m-url {
+		@apply font-mono;
+		font-size: 11.5px;
+		color: var(--ink-3);
+		margin-top: 2px;
+		word-break: break-all;
+	}
+	.zone-tag {
+		font-size: 11px;
+		color: var(--ink-2);
+		background: var(--surface-2);
+		border: 1px solid var(--border);
+		padding: 2px 7px;
+		border-radius: var(--radius-pill);
+	}
+
+	/* ---- incident row ---- */
+	.inc {
+		display: flex;
+		align-items: stretch;
+		border-bottom: 1px solid var(--border);
+	}
+	.inc:last-child {
+		border-bottom: 0;
+	}
+	.inc .stripe {
+		width: 4px;
+		flex: 0 0 4px;
+	}
+	.inc.crit .stripe {
+		background: var(--down);
+	}
+	.inc.res .stripe {
+		background: var(--up);
+	}
+	.inc .body {
+		padding: 15px 18px;
+		flex: 1;
+		min-width: 0;
+	}
+	.inc .row1 {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		flex-wrap: wrap;
+	}
+	.inc .row1 h3 {
+		font-size: 14.5px;
+	}
+	.inc .row2 {
+		display: flex;
+		gap: 16px;
+		flex-wrap: wrap;
+		margin-top: 8px;
+		@apply font-mono;
+		font-size: 11.5px;
+		color: var(--ink-3);
+	}
+	.inc .row2 b {
+		color: var(--ink-2);
+		font-weight: 500;
+	}
+	.inc .dur {
+		margin-left: auto;
+		@apply font-mono;
+		font-size: 12px;
+	}
+
+	/* ---- zones rows ---- */
+	.zrow {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 10px;
+		padding: 13px 16px;
+		border-bottom: 1px solid var(--border);
+	}
+	.zrow:last-child {
+		border-bottom: 0;
+	}
+	.zrow b {
+		font-size: 13.5px;
+	}
+
+	/* ---- monitor detail ---- */
+	.crumb {
+		font-size: 12px;
+		color: var(--ink-3);
+	}
+	.crumb a {
+		color: var(--accent-strong);
+		text-decoration: none;
+	}
+	.crumb a:hover {
+		text-decoration: underline;
+	}
+	.detail-head {
+		display: flex;
+		align-items: center;
+		gap: 14px;
+		flex-wrap: wrap;
+	}
+	.detail-head h1 {
+		font-size: 24px;
+	}
+	.chartcard {
+		padding: 8px 8px 4px;
+	}
+	.chart-legend {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		padding: 8px 12px 4px;
+		flex-wrap: wrap;
+		gap: 8px;
+	}
+	.chart-legend .t {
+		@apply font-mono;
+		font-size: 12px;
+		color: var(--ink-2);
+		display: flex;
+		align-items: center;
+		gap: 8px;
+	}
+	.chart-legend .swatch {
+		width: 22px;
+		height: 3px;
+		border-radius: 2px;
+		background: var(--accent);
+	}
+	.zone-select {
+		font-family: inherit;
+		font-size: 12px;
+		color: var(--ink-2);
+		background: var(--surface-2);
+		border: 1px solid var(--border);
+		border-radius: 8px;
+		padding: 3px 8px;
+		cursor: pointer;
+	}
+	.zone-select:hover {
+		border-color: var(--border-strong);
+		color: var(--ink);
+	}
+	.chart-legend .now {
+		@apply font-mono;
+		font-size: 12px;
+		color: var(--ink-3);
+	}
+	.chart-legend .now b {
+		color: var(--accent-strong);
+		font-size: 14px;
+	}
+	.zone-cards {
+		display: grid;
+		grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+		gap: 14px;
+	}
+	.zc {
+		padding: 15px 16px;
+	}
+	.zc .top {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+	}
+	.zc .top b {
+		font-size: 14px;
+	}
+	.zc .lat {
+		font-family: var(--font-stat);
+		font-variant-numeric: tabular-nums;
+		font-size: 24px;
+		margin-top: 12px;
+		letter-spacing: -0.02em;
+	}
+	.zc .meta {
+		@apply font-mono;
+		font-size: 11px;
+		color: var(--ink-3);
+		margin-top: 4px;
+	}
+	/* A zone that is assigned but not voting (#328). Dashed rather than coloured:
+	   it is an absence of information, not a status — reusing the down palette
+	   would read as "this zone says the target is down", which is the opposite of
+	   what it means. */
+	.zc.silent {
+		border-style: dashed;
+		background: var(--inset);
+	}
+	.zc.silent .lat,
+	.zc.silent .top b {
+		color: var(--ink-3);
+	}
+	.zc .no-data {
+		@apply font-mono uppercase;
+		font-size: 10px;
+		letter-spacing: 0.08em;
+		color: var(--ink-3);
+		border: 1px dashed var(--border-strong);
+		border-radius: var(--radius-pill);
+		padding: 2px 8px;
+	}
+	/* A stat tile whose value cannot currently be trusted (#324). Dashed, like the
+	   silent zone cards, because it marks absent information rather than a bad
+	   reading. */
+	.stat.degraded {
+		border-style: dashed;
+		background: var(--inset);
+	}
+	.stat.degraded .value {
+		color: var(--ink-3);
+	}
+
+	/* Zone picker: a zone with no live worker is still offered — you may be
+	   assigning ahead of bringing one up — but it says so, at the moment the
+	   choice is made rather than silently afterwards (#328). */
+	.zone-warn {
+		@apply font-mono uppercase;
+		font-size: 10px;
+		letter-spacing: 0.08em;
+		color: var(--pending);
+		border: 1px dashed var(--pending);
+		border-radius: var(--radius-pill);
+		padding: 1px 7px;
+	}
+
+	/* The consequence of the above, in words. Sits between the heading and the
+	   cards so it is read before the cards are interpreted. */
+	.consensus-note {
+		border: 1px dashed var(--border-strong);
+		border-radius: var(--radius-btn);
+		background: var(--inset);
+		color: var(--ink-2);
+		font-size: 13px;
+		line-height: 1.5;
+		padding: 10px 12px;
+		margin-bottom: 14px;
+	}
+
+	/* ---- auth ---- */
+	.auth-wrap {
+		min-height: 100vh;
+		display: grid;
+		place-items: center;
+		padding: 40px 20px;
+		background: var(--ground);
+	}
+	.auth-card {
+		width: 100%;
+		max-width: 384px;
+		background: var(--surface);
+		border: 1px solid var(--border);
+		border-radius: var(--radius);
+		padding: 30px 28px;
+	}
+	.auth-brand {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		margin-bottom: 22px;
+	}
+	.auth-card h1 {
+		font-size: 20px;
+		margin-bottom: 4px;
+	}
+	.auth-card .sub {
+		color: var(--ink-3);
+		font-size: 13px;
+		margin-bottom: 22px;
+	}
+	.field {
+		display: flex;
+		flex-direction: column;
+		gap: 6px;
+		margin-bottom: 14px;
+	}
+	.field label {
+		@apply font-mono uppercase;
+		font-size: 10.5px;
+		letter-spacing: 0.1em;
+		color: var(--ink-3);
+	}
+	.field input {
+		width: 100%;
+		background: var(--surface);
+		border: 1px solid var(--border-strong);
+		border-radius: var(--radius-btn);
+		padding: 10px 12px;
+		font-size: 14px;
+		color: var(--ink);
+		outline: none;
+	}
+	.field input:focus {
+		border-color: var(--accent);
+		box-shadow: 0 0 0 3px var(--accent-wash);
+	}
+	.btn-block {
+		width: 100%;
+		justify-content: center;
+		padding: 11px;
+	}
+	.auth-alt {
+		text-align: center;
+		margin-top: 18px;
+		font-size: 13px;
+		color: var(--ink-3);
+	}
+	.icon-btn {
+		display: inline-grid;
+		place-items: center;
+		width: 38px;
+		height: 38px;
+		border: 1px solid var(--border-strong);
+		border-radius: var(--radius-btn);
+		background: var(--surface);
+		cursor: pointer;
+		color: var(--ink-2);
+	}
+	.icon-btn:hover {
+		background: var(--surface-2);
+	}
+	.alert-error {
+		background: var(--down-wash);
+		color: var(--down);
+		border: 1px solid var(--down-wash);
+		border-radius: var(--radius-btn);
+		padding: 10px 12px;
+		font-size: 13px;
+		margin-bottom: 14px;
+	}
+	/* Inline per-field validation message. Positioned absolutely in the gap below
+     the input so showing/hiding it never changes the field's height (which would
+     otherwise grow the centered modal and make the form jump). Wrapper needs
+     `position: relative`. */
+	.field-err {
+		position: absolute;
+		top: 100%;
+		left: 0;
+		margin-top: 2px;
+		color: var(--down);
+		font-size: 11.5px;
+		line-height: 1.2;
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	*,
+	*::before,
+	*::after {
+		animation-duration: 0.001ms !important;
+		animation-iteration-count: 1 !important;
+	}
+}
+
+/* ---- token form-control helpers ---- */
+/* Form-control styles (inputs, native selects via <Select>, checkboxes) — theme-
+   aware via tokens (#114) so they match the app in both light and dark. */
+.form-input {
+	@apply mt-1 block w-full;
+	border-radius: var(--radius-btn);
+	background: var(--surface);
+	border: 1px solid var(--border-strong);
+	color: var(--ink);
+}
+.form-input:focus {
+	outline: none;
+	border-color: var(--accent);
+	box-shadow: 0 0 0 3px var(--accent-wash);
+}
+.form-checkbox {
+	@apply rounded shadow-sm;
+	border: 1px solid var(--border-strong);
+	accent-color: var(--accent);
+}
+
+/* Small inline "working" spinner for list filter/search (#141). Opacity-toggled
+   so showing/hiding it never shifts layout. */
+.list-spin {
+	width: 14px;
+	height: 14px;
+	flex: 0 0 14px;
+	border: 2px solid var(--border-strong);
+	border-top-color: var(--accent);
+	border-radius: 50%;
+	opacity: 0;
+	transition: opacity 0.12s;
+}
+.list-spin.on {
+	opacity: 1;
+	animation: list-spin 0.7s linear infinite;
+}
+@keyframes list-spin {
+	to {
+		transform: rotate(360deg);
+	}
+}
+
+/* Form label / hint colours, theme-aware (replacing hardcoded text-gray-* in
+   form content). */
+.form-lbl {
+	color: var(--ink-2);
+}
+.form-hint {
+	color: var(--ink-3);
+}
+
+/* Skeleton placeholder bars (#168) — a token-based loading state, replacing
+   flowbite's <ListPlaceholder>. */
+.skel {
+	height: 14px;
+	border-radius: 4px;
+	background: var(--surface-2);
+	margin-bottom: 10px;
+	animation: skel-pulse 1.1s ease-in-out infinite;
+}
+.skel:last-child {
+	margin-bottom: 0;
+}
+@keyframes skel-pulse {
+	0%,
+	100% {
+		opacity: 1;
+	}
+	50% {
+		opacity: 0.5;
+	}
+}
+
+/* Placeholders sit a clear step below entered text so an empty field reads as
+   empty at a glance — entered text is --ink, placeholders --ink-3. Both are
+   theme-aware. Unlayered so it wins over Tailwind's base placeholder color. */
+input::placeholder,
+textarea::placeholder {
+	color: var(--ink-3);
+	opacity: 1; /* Firefox dims placeholders by default */
+}
+
+/* (Blueprint #197: primary-button text is --brand-contrast, which is theme-tuned
+   — white in light, dark in dark — so the old per-theme override is gone.) */

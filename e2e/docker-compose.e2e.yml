@@ -1,0 +1,108 @@
+# Ephemeral full stack for the end-to-end suite (#126). Brings up the whole
+# system on one network — PocketBase + Valkey + worker + evaluator + web + the
+# deterministic fixture target — so tests exercise the real worker -> evaluator
+# -> PocketBase pipeline, not mocks.
+#
+# Fresh per run: `e2e/setup.sh up` brings it up and bootstraps PocketBase (schema
+# import + seeded superuser, test user, and service accounts); `e2e/setup.sh down`
+# tears it down with its volumes. All credentials here are throwaway LOCAL test
+# values — nothing sensitive, safe to commit.
+name: monitors-e2e
+
+services:
+  valkey:
+    image: valkey/valkey
+    healthcheck:
+      test: ['CMD', 'valkey-cli', 'ping']
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+  pocketbase:
+    image: ghcr.io/muchobien/pocketbase:latest
+    # Ephemeral data: a named volume the teardown removes with `down -v`.
+    volumes:
+      - pb_data:/pb_data
+    ports:
+      - '${E2E_PB_PORT:-8390}:8090'
+    healthcheck:
+      test: ['CMD', 'wget', '-qO-', 'http://127.0.0.1:8090/api/health']
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  fixture:
+    build:
+      context: ./fixture
+    # Reachable as http://fixture:8080 (and tcp fixture:9090) from the worker/evaluator.
+    # Published so the host-side test can read the webhook receiver back.
+    ports:
+      - '${E2E_FIXTURE_PORT:-8788}:8080'
+    healthcheck:
+      test: ['CMD', 'wget', '-qO-', 'http://127.0.0.1:8080/health']
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+  worker:
+    build:
+      context: ..
+      dockerfile: worker/dockerfile
+    restart: unless-stopped
+    depends_on:
+      valkey:
+        condition: service_healthy
+      pocketbase:
+        condition: service_healthy
+    environment:
+      - REGION_NAME=e2e
+      - CACHE_HOST=valkey
+      - CACHE_PORT=6379
+      - PB_URL=http://pocketbase:8090
+      - PB_AUTH_COLLECTION=service_accounts
+      - PB_ADMIN_USERNAME=${E2E_WORKER_USERNAME:-worker@e2e.local}
+      - PB_ADMIN_PASSWORD=${E2E_WORKER_PASSWORD:-worker-e2e-pass}
+      # Health HTTP server off — the e2e assertions use the data pipeline, not it.
+      - HEALTH_ADDR=off
+
+  evaluator:
+    build:
+      context: ..
+      dockerfile: evaluator/dockerfile
+    restart: unless-stopped
+    depends_on:
+      pocketbase:
+        condition: service_healthy
+    environment:
+      - PB_URL=http://pocketbase:8090
+      - PB_AUTH_COLLECTION=service_accounts
+      - PB_ADMIN_USERNAME=${E2E_EVALUATOR_USERNAME:-evaluator@e2e.local}
+      - PB_ADMIN_PASSWORD=${E2E_EVALUATOR_PASSWORD:-evaluator-e2e-pass}
+      # Fast dead-man threshold so zone-silence tests don't wait long.
+      - DEADMAN_SECONDS=30
+      - HEALTH_ADDR=off
+
+  web:
+    build:
+      context: ..
+      dockerfile: app/dockerfile
+    restart: unless-stopped
+    depends_on:
+      pocketbase:
+        condition: service_healthy
+    environment:
+      - PB_URL=http://pocketbase:8090
+      # Must match Playwright's baseURL host exactly, or SvelteKit's CSRF guard
+      # rejects the sign-in POST (127.0.0.1 != localhost).
+      - ORIGIN=http://127.0.0.1:${E2E_WEB_PORT:-4390}
+      - HOST=0.0.0.0
+      - PORT=3000
+      - PKCE_FLOW_ENCRYPTION_KEY=e2e-only-not-a-secret
+      - WEB_PB_COLLECTION=service_accounts
+      - WEB_PB_USERNAME=${E2E_WORKER_USERNAME:-worker@e2e.local}
+      - WEB_PB_PASSWORD=${E2E_WORKER_PASSWORD:-worker-e2e-pass}
+    ports:
+      - '${E2E_WEB_PORT:-4390}:3000'
+
+volumes:
+  pb_data:

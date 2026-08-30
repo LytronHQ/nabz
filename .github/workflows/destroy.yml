@@ -1,0 +1,55 @@
+name: destroy
+
+# Tears an environment's Hetzner fleet down — servers AND the data volume.
+# Staging is meant to be ephemeral: stand it up, look at it, destroy it.
+#
+# Deliberately awkward for production: the environment name must be typed, and
+# production should carry required reviewers.
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Target environment
+        type: environment
+        required: true
+      confirm:
+        description: Type the environment name to confirm
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  destroy:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Confirm
+        run: |
+          [ "${{ inputs.confirm }}" = "${{ inputs.environment }}" ] \
+            || { echo "::error::confirmation did not match the environment name"; exit 1; }
+      # Before the fleet: once the servers are gone the monitors go red and page
+      # someone about an environment that was deleted on purpose.
+      - name: Install bws
+        uses: ./.github/actions/bws
+      - name: Remove external monitors
+        continue-on-error: true
+        env:
+          ENV_NAME: ${{ inputs.environment }}
+          BWS_ACCESS_TOKEN: ${{ secrets.BWS_ACCESS_TOKEN }}
+        run: ./deploy/external-watch.sh "$ENV_NAME" --remove
+
+      - name: Destroy
+        env:
+          HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN_RW }}
+          SERVER_PREFIX: ${{ vars.SERVER_PREFIX }}
+          # Scopes the teardown by label. Without it SERVER_PREFIX alone decides,
+          # and production's "nabz-" is a prefix of staging's names — so a
+          # production teardown would take the staging fleet with it.
+          ENVIRONMENT: ${{ inputs.environment }}
+        # Deletes the volume too — pb_data goes with it. A backup that has never
+        # been restored is not a backup; this is the moment that matters.
+        run: ./deploy/hetzner/destroy.sh --yes

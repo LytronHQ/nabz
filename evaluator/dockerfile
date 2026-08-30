@@ -1,0 +1,30 @@
+FROM golang:alpine as build
+
+ENV CGO_ENABLED=0
+
+WORKDIR /corelib
+ADD ./corelib /corelib
+
+WORKDIR /build
+ADD ./evaluator /build
+# Deployed version + commit, surfaced on the debug health tier (#103). Passed as
+# build args by the compose files (BUILD_VERSION / BUILD_COMMIT).
+ARG BUILD_VERSION=dev
+ARG BUILD_COMMIT=unknown
+RUN GOOS=linux go mod tidy && go build \
+	-ldflags "-w -s -X 'monitors/corelib/health.Version=${BUILD_VERSION}' -X 'monitors/corelib/health.Commit=${BUILD_COMMIT}'" \
+	-o evaluator
+
+FROM alpine:latest
+
+WORKDIR /app
+RUN apk update && apk upgrade --no-cache
+RUN apk add --no-cache curl bash
+
+COPY --from=build /build/evaluator /app
+COPY --from=build /build/config.yml /app
+
+# Two-tier health endpoint (#103): /health + /health/all. Off unless HEALTH_ADDR is set.
+EXPOSE 8080
+
+ENTRYPOINT ["/app/evaluator"]

@@ -1,0 +1,8 @@
+node_modules/
+test-results/
+playwright-report/
+.playwright/
+# Local channel credentials for the real-delivery tests (later increment) — never
+# committed; each channel test skips when its credential is absent.
+.env.local
+results.json

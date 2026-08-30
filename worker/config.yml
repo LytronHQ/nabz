@@ -1,0 +1,14 @@
+region:
+  name: <ENV:REGION_NAME>
+worker:
+  id: <ENV:WORKER_ID>
+cache:
+  host: <ENV:CACHE_HOST>
+  port: <ENV:CACHE_PORT>
+  password: <ENV:CACHE_PASSWORD>
+pb:
+  url: <ENV:PB_URL>
+  admin:
+    collection: <ENV:PB_AUTH_COLLECTION>
+    username: <ENV:PB_ADMIN_USERNAME>
+    password: <ENV:PB_ADMIN_PASSWORD>

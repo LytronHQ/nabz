@@ -1,0 +1,10 @@
+*.exe
+*.exe~
+*.test
+*.out
+.env
+*.db
+*.db*
+
+# Compiled module binary (same name as module dir)
+/evaluator

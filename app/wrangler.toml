@@ -1,0 +1,94 @@
+# Cloudflare Workers config for the nabz web app (SvelteKit via
+# @sveltejs/adapter-cloudflare). The build (`ADAPTER=cloudflare npm run build`)
+# writes the Worker to `main` and the static assets to `assets.directory`, both
+# under .svelte-kit/cloudflare. Deploy with `wrangler deploy` from app/.
+#
+# Runtime config: non-secret env goes in [vars]; secrets are set out-of-band with
+# `wrangler secret put` — see deploy/cloudflare/secrets.sh. Do NOT commit secrets.
+name = "nabz"
+# adapter-cloudflare WRITES the worker to whatever `main` says, so this cannot
+# point at a hand-written wrapper — the build would overwrite it. The cron wrapper
+# for the liveness beat (#339) is added afterwards by scripts/wrap-worker.mjs,
+# which renames this file and writes a new one in its place.
+main = ".svelte-kit/cloudflare/_worker.js"
+compatibility_date = "2026-08-01"
+
+# nodejs_compat: the app pulls in Node-oriented libraries (pocketbase, crypto-js,
+# jwt-decode).
+#
+# global_fetch_strictly_public is LOAD-BEARING, not tuning (#338). By default a
+# Worker's fetch() to a hostname on its OWN zone is "routed to the zone's origin
+# server, ignoring any Workers mapped to the URL and also bypassing Cloudflare
+# security settings" — which means requests to pb.nabz.sh would skip Cloudflare
+# Access entirely. Everything would still work, and the authentication layer
+# simply would not be in the path. With this flag the request behaves as if it
+# came from the public internet: edge -> Access -> Tunnel -> PocketBase.
+compatibility_flags = ["nodejs_compat", "global_fetch_strictly_public"]
+
+# Serve the app on the apex and www as Cloudflare custom domains (the zone must
+# be in this account). TLS is managed by Cloudflare. Must stay ABOVE the first
+# table header — in TOML every key after `[assets]`/`[vars]` belongs to that
+# table, which would make this a var named "routes" instead of route config.
+routes = [
+	{ pattern = "nabz.sh", custom_domain = true },
+	{ pattern = "www.nabz.sh", custom_domain = true }
+]
+
+# Static assets (client build + prerendered pages), served before the Worker.
+[assets]
+binding = "ASSETS"
+directory = ".svelte-kit/cloudflare"
+
+# Non-secret runtime env. Secrets are pushed by the deploy-web workflow, never here.
+[vars]
+PB_URL = "https://pb.nabz.sh"
+# Only used to build an absolute URL for the cron liveness beat; routing inside
+# the Worker is by path, so this just keeps logs honest per environment.
+WEB_URL = "https://nabz.sh"
+WEB_PB_COLLECTION = "service_accounts"
+HEALTH_STALE_SECONDS = "90"
+
+# --- staging (#343) -----------------------------------------------------------
+# A pre-prod fleet for a last eyeball check in a real cloud before releasing.
+# Its own Worker, own hostnames, own PocketBase — nothing is shared with
+# production. Deployed with `wrangler deploy --env staging`; the deploy-web
+# workflow passes that when the environment sets WRANGLER_ENV=staging.
+[env.staging]
+name = "nabz-staging"
+compatibility_flags = ["nodejs_compat", "global_fetch_strictly_public"]
+# BOTH of these are load-bearing, and neither is a default.
+#
+# `routes` is an INHERITABLE key in wrangler, so an environment that omits it
+# inherits the top-level value — which here is nabz.sh and www.nabz.sh as custom
+# domains. `wrangler deploy --env staging` therefore tried to bind PRODUCTION's
+# hostnames to the staging Worker; the only reason it did not is that the API
+# token lacked Workers Routes permission and the call 403'd. An empty list is
+# what actually keeps staging off the production zone.
+#
+# And because inheriting routes turns workers_dev off, staging also had no
+# workers.dev URL at all. Set it explicitly rather than relying on the absence of
+# routes to imply it.
+routes = []
+workers_dev = true
+
+[env.staging.assets]
+binding = "ASSETS"
+directory = ".svelte-kit/cloudflare"
+
+[env.staging.vars]
+PB_URL = "https://pb-staging.nabz.sh"
+WEB_URL = "https://nabz-staging.lytron-systems-ltd.workers.dev"
+WEB_PB_COLLECTION = "service_accounts"
+HEALTH_STALE_SECONDS = "90"
+
+# No custom domains: staging rides the workers.dev subdomain, so it needs no DNS
+# and cannot be confused with production — enforced by `routes = []` above, not
+# by leaving routes unset, which inherits production's.
+
+# Path-liveness beat (#339). Every 2 minutes against a 5-minute staleness window,
+# so a single missed run does not make the evaluator distrust heartbeat verdicts.
+[triggers]
+crons = ["*/2 * * * *"]
+
+[env.staging.triggers]
+crons = ["*/2 * * * *"]

@@ -1,0 +1,72 @@
+# PocketBase role: a self-hosted PocketBase instance (data + auth) for the whole
+# system. Run ONE. Deployed by remote-deploy.sh; seeded by setup-pocketbase.sh.
+#
+# Built from the official pinned release binary (deploy/pocketbase/Dockerfile),
+# not a third-party :latest image. PB_VERSION (+ optional PB_SHA256) come from
+# the environment / pocketbase.env so the built image is reproducible.
+#
+#   PB_VERSION=0.28.4 docker compose -f deploy/pocketbase.yml up -d --build
+name: monitors-pocketbase
+
+services:
+  pocketbase:
+    build:
+      context: ./pocketbase
+      args:
+        PB_VERSION: ${PB_VERSION:-0.28.4}
+        PB_SHA256: ${PB_SHA256:-}
+    image: nabz-pocketbase:${PB_VERSION:-0.28.4}
+    restart: unless-stopped
+    ports:
+      # On prod PB_BIND_IP is the host's PRIVATE network address, so PocketBase
+      # never listens on a public interface at all (#338) — belt and braces with
+      # ufw, which denies inbound anyway. The Cloudflare Tunnel reaches it over
+      # loopback, so cloudflared runs on this host. Unset = 0.0.0.0 for dev.
+      - '${PB_BIND_IP:-0.0.0.0}:8090:8090'
+    volumes:
+      # PB_DATA_PATH is an absolute host path on prod — the mountpoint of the
+      # attached Hetzner Volume (#331), set by setup-pocketbase.sh. Compose reads
+      # a source starting with "/" as a bind mount and anything else as a named
+      # volume, so leaving it unset keeps the local `pb_data` volume that dev and
+      # a bare `compose up` use. Container path stays /pb_data either way — the
+      # Dockerfile, setup-pocketbase.sh and rotate-superuser.sh all hard-code it.
+      - ${PB_DATA_PATH:-pb_data}:/pb_data
+    healthcheck:
+      test: ['CMD', 'wget', '-qO-', 'http://127.0.0.1:8090/api/health']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # The Cloudflare Tunnel (#338). PocketBase has NO public inbound port; the web
+  # app runs on Cloudflare Workers and cannot route to a private IP, so it comes
+  # in through this tunnel, which is OUTBOUND-ONLY — cloudflared dials out to
+  # Cloudflare and nothing dials in. Access sits in front of the public hostname
+  # and only lets requests through that carry the service token.
+  #
+  # Started only when the `tunnel` profile is enabled (setup-pocketbase.sh does
+  # that when TUNNEL_TOKEN is set), so dev and a bare `compose up` are unchanged.
+  #
+  # The token is `:-`, not `:?`, and that is load-bearing: compose interpolates
+  # EVERY service before it applies profiles, so a required-variable marker here
+  # aborts the whole file even when this service is switched off. That made
+  # setup-pocketbase.sh's "no TUNNEL_TOKEN — not starting the Cloudflare Tunnel"
+  # branch unreachable — it printed the message and then died on the next line.
+  # The script decides whether the tunnel runs; it already refuses to enable the
+  # profile without a token, which is where that check belongs.
+  # Ingress (pb.nabz.sh -> http://<private-ip>:8090) is configured on the
+  # Cloudflare side; this container only needs the token.
+  #
+  # TWO replicas on purpose: one connector is a single point of failure for the
+  # whole web app, and a crash would look like a total outage (#339).
+  cloudflared:
+    image: cloudflare/cloudflared:${CLOUDFLARED_VERSION:-2026.8.2}
+    profiles: ['tunnel']
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      - TUNNEL_TOKEN=${TUNNEL_TOKEN:-}
+    deploy:
+      replicas: 2
+
+volumes:
+  pb_data:

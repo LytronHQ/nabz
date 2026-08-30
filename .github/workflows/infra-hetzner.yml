@@ -1,0 +1,68 @@
+name: infra-hetzner
+
+# Provisions the fleet — servers, the pb_data volume, the private network — by
+# running deploy/hetzner/provision.sh, then writes what it printed back as
+# environment secrets so the later workflows need no copy-paste.
+#
+# Idempotent: provision.sh looks everything up by name first.
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Target environment
+        type: environment
+        required: true
+  workflow_call:
+    inputs:
+      environment: { type: string, required: true }
+
+permissions:
+  contents: read
+
+jobs:
+  provision:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Provision
+        id: run
+        env:
+          HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN_RW }}
+          # The Hetzner key name is derived from the key's fingerprint, so there
+          # is no separate name to keep in sync with the key.
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SERVER_PREFIX: ${{ vars.SERVER_PREFIX }}
+          PRIVATE_NETWORK: ${{ vars.PRIVATE_NETWORK }}
+          ENVIRONMENT: ${{ inputs.environment }}
+        run: |
+          set -euo pipefail
+          ./deploy/hetzner/provision.sh | tee /tmp/provision.out
+
+      - name: Store the outputs as secrets
+        env:
+          GH_TOKEN: ${{ secrets.GH_SECRETS_PAT }}
+          ENV_NAME: ${{ inputs.environment }}
+        run: |
+          set -euo pipefail
+          # provision.sh prints a NODES block and four KEY=VALUE lines. None of
+          # these are secret in themselves, but they live with the rest of the
+          # environment's config so deploy-nodes has exactly one source.
+          # Inner lines ONLY. The previous pattern kept the wrapper, so the stored
+          # secret began with a literal `NODES="` line and ended with `"` — and
+          # remote-deploy.sh parses NODES as one `role ip zone` per line, so it
+          # read `NODES="` as a role and died with "unknown role" AFTER PocketBase
+          # had already deployed.
+          nodes="$(awk '/^NODES="/{f=1;next} f&&/^"$/{exit} f{print}' /tmp/provision.out)"
+          [ -n "$nodes" ] || { echo "::error::provision.sh printed no NODES block"; exit 1; }
+          gh secret set NODES --env "$ENV_NAME" --repo "${{ github.repository }}" --body "$nodes"
+          for key in PB_DATA_DEVICE PB_URL PB_BIND_IP PRIVATE_SUBNET; do
+            val="$(grep -m1 "^${key}=" /tmp/provision.out | cut -d= -f2-)"
+            case "$val" in ''|*'<not provisioned>'*)
+              echo "::error::provision.sh did not report $key"; exit 1 ;;
+            esac
+            gh secret set "$key" --env "$ENV_NAME" --repo "${{ github.repository }}" --body "$val"
+            echo "set $key"
+          done

@@ -1,0 +1,56 @@
+name: Release
+
+# Publish a GitHub Release when a vX.Y.Z tag is pushed, using that version's
+# CHANGELOG.md section as the notes. `workflow_dispatch` (with a tag input) lets
+# you (re)publish an already-pushed tag — e.g. to backfill v0.4.0 / v0.5.0.
+
+on:
+  push:
+    tags: ['v[0-9]+.[0-9]+.[0-9]+']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to publish a release for (e.g. v0.5.0)'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Build release notes from CHANGELOG
+        id: notes
+        run: |
+          VER="${{ github.event.inputs.tag || github.ref_name }}"
+          echo "tag=$VER" >> "$GITHUB_OUTPUT"
+          # The section under `## <VER>` up to the next `## v…`, minus the leading
+          # italic date line (the release page shows the tag date already).
+          awk -v h="## $VER" '$0==h{g=1;next} /^## v[0-9]/{if(g)exit} g' CHANGELOG.md \
+            | sed '/./,$!d' | sed '1{/^_.*_$/d}' | sed '/./,$!d' > notes.md
+          if [ -s notes.md ]; then echo "have_notes=1" >> "$GITHUB_OUTPUT"; else echo "have_notes=0" >> "$GITHUB_OUTPUT"; fi
+
+      - name: Create or update the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VER="${{ steps.notes.outputs.tag }}"
+          if gh release view "$VER" >/dev/null 2>&1; then
+            if [ "${{ steps.notes.outputs.have_notes }}" = "1" ]; then
+              gh release edit "$VER" --title "$VER" --notes-file notes.md
+              echo "updated release $VER"
+            else
+              echo "release $VER exists and no CHANGELOG section — left as-is"
+            fi
+          elif [ "${{ steps.notes.outputs.have_notes }}" = "1" ]; then
+            gh release create "$VER" --verify-tag --title "$VER" --notes-file notes.md
+            echo "created release $VER from CHANGELOG"
+          else
+            gh release create "$VER" --verify-tag --title "$VER" --generate-notes
+            echo "created release $VER with auto-generated notes (no CHANGELOG section)"
+          fi

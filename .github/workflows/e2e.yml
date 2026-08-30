@@ -1,0 +1,68 @@
+name: e2e
+
+# Real-stack end-to-end suite (#126). It stands up a full docker-compose fleet
+# and hits real services, so it's SLOW and NOT run per-PR — only on demand and
+# nightly. The fast unit tests (ci.yml) stay the per-PR gate.
+on:
+  workflow_dispatch:
+  schedule:
+    # 03:17 UTC nightly (off the hour to dodge the scheduler rush).
+    - cron: '17 3 * * *'
+
+# Don't pile up overlapping nightly + manual runs.
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: e2e/package-lock.json
+
+      - name: Install e2e deps
+        working-directory: e2e
+        run: npm ci
+
+      - name: Install Playwright browser
+        working-directory: e2e
+        run: npx playwright install --with-deps chromium
+
+      # global-setup builds + starts the stack (PocketBase + worker + evaluator +
+      # web + fixture), runs the journeys (API pipeline + browser UI), and
+      # global-teardown removes it.
+      - name: Run e2e
+        working-directory: e2e
+        # Real channel-delivery credentials (#126). Each is optional — the matching
+        # channel test skips when its secret is unset, so a fork without them still
+        # runs the rest of the suite green.
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          PAGERDUTY_ROUTING_KEY: ${{ secrets.PAGERDUTY_ROUTING_KEY }}
+        run: npx playwright test
+
+      # Render the JSON report as a table on the run's summary page. Runs even
+      # when the tests failed, so failures show up in the summary too.
+      - name: Test summary
+        if: ${{ !cancelled() }}
+        working-directory: e2e
+        run: node summary.mjs results.json
+
+      - name: Upload report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: e2e/playwright-report/
+          retention-days: 7
+          if-no-files-found: ignore

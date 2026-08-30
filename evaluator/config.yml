@@ -1,0 +1,6 @@
+pb:
+  url: <ENV:PB_URL>
+  admin:
+    collection: <ENV:PB_AUTH_COLLECTION>
+    username: <ENV:PB_ADMIN_USERNAME>
+    password: <ENV:PB_ADMIN_PASSWORD>

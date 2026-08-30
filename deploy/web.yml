@@ -1,0 +1,44 @@
+# Web role: the SvelteKit app as a Node server, pointed at PocketBase via PB_URL.
+# Single source of truth for what runs on a web node.
+#
+#   docker compose --env-file /etc/monitors/web.env -f deploy/web.yml up -d --build
+name: monitors-web
+
+services:
+  web:
+    build:
+      # Repo root so the build can see CHANGELOG.md (imported at build time by the
+      # /changelog page). The Dockerfile lives under app/.
+      context: ..
+      dockerfile: app/dockerfile
+    restart: unless-stopped
+    ports:
+      - '3000:3000'
+    environment:
+      - PB_URL=${PB_URL}
+      - PKCE_FLOW_ENCRYPTION_KEY=${PKCE_FLOW_ENCRYPTION_KEY:-}
+      - ORIGIN=${ORIGIN}
+      - HOST=0.0.0.0
+      - PORT=3000
+      # Service-account creds for the public /ping/{token} heartbeat check-in.
+      - WEB_PB_COLLECTION=${WEB_PB_COLLECTION:-service_accounts}
+      - WEB_PB_USERNAME=${WEB_PB_USERNAME:-}
+      - WEB_PB_PASSWORD=${WEB_PB_PASSWORD:-}
+      # Public /api/health (fleet aggregate). A blank HEALTH_DEBUG_TOKEN keeps only
+      # the minimal public tier; HEALTH_STALE_SECONDS is the heartbeat staleness
+      # window (default 90).
+      - HEALTH_DEBUG_TOKEN=${HEALTH_DEBUG_TOKEN:-}
+      - HEALTH_STALE_SECONDS=${HEALTH_STALE_SECONDS:-90}
+      # Defaults to on. false only for an HTTP-served fleet (#394).
+      - COOKIE_SECURE=${COOKIE_SECURE:-true}
+      # Allowlist (comma/space separated) of emails that may see /admin/usage.
+      # Empty = nobody. Separate from HEALTH_DEBUG_TOKEN.
+      - ADMIN_EMAILS=${ADMIN_EMAILS:-}
+      # Leave NODE_ENV unset over plain http (secure cookies would break login);
+      # set NODE_ENV=production once the app is behind TLS.
+      - NODE_ENV=${NODE_ENV:-}
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -q -O /dev/null http://127.0.0.1:3000/signin || exit 1']
+      interval: 15s
+      timeout: 5s
+      retries: 5

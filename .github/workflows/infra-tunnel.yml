@@ -1,0 +1,47 @@
+name: infra-tunnel
+
+# Creates the Cloudflare Tunnel that fronts PocketBase, wires its ingress and
+# DNS, and stores the connector token. Needs PB_BIND_IP, so run after
+# infra-hetzner.
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Target environment
+        type: environment
+        required: true
+  workflow_call:
+    inputs:
+      environment: { type: string, required: true }
+
+permissions:
+  contents: read
+
+jobs:
+  tunnel:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create or update the tunnel
+        env:
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          CF_ZONE_NAME: ${{ vars.CF_ZONE_NAME }}
+          TUNNEL_HOSTNAME: ${{ vars.PB_HOSTNAME }}
+          TUNNEL_NAME: ${{ vars.TUNNEL_NAME }}
+          PB_BIND_IP: ${{ secrets.PB_BIND_IP }}
+          GH_TOKEN: ${{ secrets.GH_SECRETS_PAT }}
+          ENV_NAME: ${{ inputs.environment }}
+        run: |
+          set -euo pipefail
+          [ -n "$PB_BIND_IP" ] || { echo "::error::PB_BIND_IP is not set — run infra-hetzner first"; exit 1; }
+          # The token is the last line on stdout; everything else goes to stderr.
+          # Captured, never printed.
+          out="$(./deploy/cloudflare/tunnel.sh)"
+          token="${out#TUNNEL_TOKEN=}"
+          [ -n "$token" ] && [ "$token" != "$out" ] || { echo "::error::no tunnel token returned"; exit 1; }
+          gh secret set TUNNEL_TOKEN --env "$ENV_NAME" --repo "${{ github.repository }}" --body "$token"
+          echo "TUNNEL_TOKEN stored. The tunnel stays down until deploy-nodes starts a connector."

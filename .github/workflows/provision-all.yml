@@ -1,0 +1,83 @@
+name: provision-all
+
+# Cold start: everything from an empty environment to a deployed fleet, in the
+# only order that works. Each step is the standalone workflow, so a partial
+# re-run is just running one of them again.
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Target environment
+        type: environment
+        required: true
+      deploy:
+        description: Deploy after provisioning
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  credentials:
+    uses: ./.github/workflows/bootstrap-credentials.yml
+    with: { environment: "${{ inputs.environment }}" }
+    secrets: inherit
+
+  hetzner:
+    needs: credentials
+    uses: ./.github/workflows/infra-hetzner.yml
+    with: { environment: "${{ inputs.environment }}" }
+    secrets: inherit
+
+  # Needs PB_BIND_IP from hetzner.
+  tunnel:
+    needs: hetzner
+    uses: ./.github/workflows/infra-tunnel.yml
+    with: { environment: "${{ inputs.environment }}" }
+    secrets: inherit
+
+  access:
+    needs: tunnel
+    uses: ./.github/workflows/infra-access.yml
+    with: { environment: "${{ inputs.environment }}" }
+    secrets: inherit
+
+  # BEFORE nodes, not after. remote-deploy.sh does not receive the heartbeat URLs —
+  # it looks them up from Better Stack by name and writes them into the evaluator's
+  # env file. On a cold start, with watch running afterwards, those heartbeats did
+  # not exist yet, so the lookup found nothing and the evaluator was deployed with
+  # HEALTHCHECK_PING_URL and PB_MAINTENANCE_PING_URL empty. Both treat unset as
+  # "feature off", so the dead-man switch and the maintenance heartbeat were
+  # silently disabled on exactly the run that sets an environment up — and only a
+  # later redeploy would quietly fix it.
+  watch:
+    needs: access
+    # Opt-out, not opt-in: an environment is watched unless it says otherwise, so
+    # forgetting to set the variable leaves you monitored rather than blind.
+    if: ${{ inputs.deploy && vars.EXTERNAL_WATCH != 'off' }}
+    uses: ./.github/workflows/infra-watch.yml
+    with: { environment: "${{ inputs.environment }}" }
+    secrets: inherit
+
+  # Brings PocketBase up and starts the tunnel connectors, so it must precede
+  # the web deploy's Access check.
+  #
+  # The result check is required, not decoration: a skipped `needs` job skips its
+  # dependents by default, and watch IS skipped whenever EXTERNAL_WATCH=off — which
+  # staging sets. Without this the reordering above would have stopped staging
+  # deploying at all.
+  nodes:
+    needs: [access, watch]
+    if: ${{ inputs.deploy && !cancelled() && (needs.watch.result == 'success' || needs.watch.result == 'skipped') }}
+    uses: ./.github/workflows/deploy-nodes.yml
+    with: { environment: "${{ inputs.environment }}" }
+    secrets: inherit
+
+  web:
+    needs: nodes
+    if: ${{ inputs.deploy }}
+    uses: ./.github/workflows/deploy-web.yml
+    with: { environment: "${{ inputs.environment }}" }
+    secrets: inherit

@@ -1,0 +1,109 @@
+name: email-canary
+
+# Daily email deliverability canary (launch checklist / #297). An alerting product
+# whose alerts silently land in spam has failed completely — this proves the mail
+# path actually delivers to the inbox, end to end, every day, and goes red before a
+# real incident discovers it. Uses the MailerSend API (send + activity poll).
+#
+# The three credentials are optional: with none of them set the job skips and stays
+# green, so a self-hosted fork is not stuck with a daily red X for a check it never
+# asked for. Add them as repository secrets and the canary runs as-is.
+on:
+  workflow_dispatch:
+  schedule:
+    # 06:23 UTC daily (off the hour to dodge the scheduler rush)
+    - cron: '23 6 * * *'
+
+concurrency:
+  group: email-canary
+  cancel-in-progress: false
+
+jobs:
+  canary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      MAILERSEND_API_TOKEN: ${{ secrets.MAILERSEND_API_TOKEN }}
+      MAILERSEND_DOMAIN_ID: ${{ secrets.MAILERSEND_DOMAIN_ID }}
+      CANARY_FROM: ${{ vars.CANARY_FROM || 'canary@nabz.sh' }}
+      CANARY_TO: ${{ secrets.CANARY_TO }}
+    steps:
+      # Skip, don't fail, when the canary is not configured. A partial set is still
+      # an error: it means someone meant to enable this and left it half-wired,
+      # which is exactly the state that should be loud rather than silently green.
+      - name: Preflight (secrets present)
+        id: preflight
+        run: |
+          set -uo pipefail
+          set_count=0; missing=""
+          for v in MAILERSEND_API_TOKEN MAILERSEND_DOMAIN_ID CANARY_TO; do
+            if [ -n "${!v:-}" ]; then set_count=$((set_count + 1)); else missing="$missing $v"; fi
+          done
+          if [ "$set_count" = 0 ]; then
+            echo "::notice::email canary skipped — MailerSend credentials are not configured. Set MAILERSEND_API_TOKEN, MAILERSEND_DOMAIN_ID and CANARY_TO as repository secrets to enable it."
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          elif [ -n "$missing" ]; then
+            echo "::error::email canary is partly configured — unset:$missing"
+            exit 1
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Send canary email (assert 202 + x-message-id)
+        id: send
+        if: steps.preflight.outputs.configured == 'true'
+        run: |
+          set -uo pipefail
+          # A unique subject ties the send to the activity record we poll for.
+          subject="nabz email canary ${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          echo "subject=$subject" >> "$GITHUB_OUTPUT"
+          payload="$(jq -nc \
+            --arg from "$CANARY_FROM" --arg to "$CANARY_TO" --arg subj "$subject" \
+            '{from:{email:$from,name:"nabz canary"},
+              to:[{email:$to}],
+              subject:$subj,
+              text:"Automated deliverability canary. If this reaches the inbox, the alert mail path is healthy."}')"
+          code="$(curl -sS -o body.json -D headers.txt -w '%{http_code}' \
+            -X POST https://api.mailersend.com/v1/email \
+            -H "Authorization: Bearer $MAILERSEND_API_TOKEN" \
+            -H 'Content-Type: application/json' -H 'X-Requested-With: XMLHttpRequest' \
+            -d "$payload")"
+          echo "HTTP $code"; cat body.json 2>/dev/null || true
+          if [ "$code" != "202" ]; then
+            echo "::error::MailerSend send did not return 202 (got $code)"; exit 1
+          fi
+          # x-message-id header identifies the queued message.
+          msg_id="$(grep -i '^x-message-id:' headers.txt | tail -n1 | tr -d '\r' | awk '{print $2}')"
+          [ -n "$msg_id" ] || { echo "::error::202 but no x-message-id header"; exit 1; }
+          echo "message id: $msg_id"
+          echo "message_id=$msg_id" >> "$GITHUB_OUTPUT"
+
+      - name: Poll activity until delivered
+        if: steps.preflight.outputs.configured == 'true'
+        run: |
+          set -uo pipefail
+          msg_id="${{ steps.send.outputs.message_id }}"
+          subject="${{ steps.send.outputs.subject }}"
+          from_ts="$(( $(date +%s) - 300 ))"   # 5 min back to be safe
+          delivered=0
+          for attempt in $(seq 1 12); do        # ~6 min (12 x 30s)
+            sleep 30
+            to_ts="$(date +%s)"
+            resp="$(curl -sS "https://api.mailersend.com/v1/activity/${MAILERSEND_DOMAIN_ID}?date_from=${from_ts}&date_to=${to_ts}&event[]=delivered&event[]=hard_bounced&event[]=soft_bounced&event[]=rejected" \
+              -H "Authorization: Bearer $MAILERSEND_API_TOKEN")"
+            # Match our message either by message id or the unique subject, then
+            # inspect its event type. (Field names per the MailerSend Activity API.)
+            match="$(jq -r --arg id "$msg_id" --arg subj "$subject" '
+              [.data[]? | select((.email.message.id // "") == $id or (.email.subject // "") == $subj)]
+              | (map(.type) | join(",")) // ""' <<<"$resp" 2>/dev/null || echo "")"
+            echo "attempt $attempt: events=[${match}]"
+            case ",$match," in
+              *,delivered,*) delivered=1; break ;;
+              *hard_bounced*|*soft_bounced*|*rejected*)
+                echo "::error::canary email failed to deliver (events: $match)"; exit 1 ;;
+            esac
+          done
+          if [ "$delivered" != 1 ]; then
+            echo "::error::canary email not marked delivered within the polling window"; exit 1
+          fi
+          echo "✅ canary delivered"

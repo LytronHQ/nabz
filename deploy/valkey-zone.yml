@@ -1,0 +1,61 @@
+# Shared zone Valkey (#311) — ONE per zone, for a zone spread across several VMs.
+#
+#   docker compose --env-file /etc/monitors/valkey-zone.env -f deploy/valkey-zone.yml up -d
+#
+# Every worker in a zone must point at this one instance. Two Valkeys in a zone
+# means two due-sets and two seed leaders, so every monitor gets probed twice —
+# duplicate checks, duplicate load on the target, and an incident count that
+# double-reports. The zone is the shard key; the queue is what makes it one shard.
+#
+# No persistence, deliberately. The due-set is fully rebuildable: seedLoop
+# re-adds every enabled monitor for the zone within seedInterval, so a restart
+# costs one seeding pass rather than needing an AOF or RDB to survive. Reservation
+# state is likewise self-healing — an unrescheduled monitor becomes due again
+# after reservationSeconds.
+#
+# TRANSPORT: bind this to a PRIVATE interface — a Tailscale/WireGuard address, or
+# a cloud private network — and let that carry the encryption. requirepass over a
+# public interface is a password on a cleartext wire, not transport security.
+# BIND_ADDR must therefore be a specific private address; the default below is
+# loopback so that an unconfigured deployment fails closed rather than listening
+# to the world.
+name: monitors-valkey-zone
+
+services:
+  valkey:
+    image: valkey/valkey
+    restart: unless-stopped
+    # A folded scalar (`>`) has NO comment syntax — every line is content. A `#`
+    # line inside one is passed to the entrypoint as literal arguments, so the
+    # explanation that used to sit next to --maxmemory-policy became
+    # `# noeviction, not an LRU policy: ...` on valkey-server's command line and
+    # the policy flag itself never took effect. Explanations go here instead.
+    #
+    # --save "" / --appendonly no: no persistence. The due-set is rebuildable —
+    # seedLoop re-adds every enabled monitor within seedInterval — so a restart
+    # costs one seeding pass rather than an AOF to maintain.
+    #
+    # --maxmemory-policy noeviction, NOT an LRU policy: the due-set IS the
+    # schedule. Evicting keys under memory pressure would silently unschedule
+    # monitors and stop probing them, which looks exactly like everything being
+    # fine.
+    command:
+      - valkey-server
+      - --requirepass
+      - ${CACHE_PASSWORD:?CACHE_PASSWORD is required for a shared Valkey}
+      - --save
+      - ""
+      - --appendonly
+      - "no"
+      - --maxmemory
+      - ${CACHE_MAXMEMORY:-256mb}
+      - --maxmemory-policy
+      - noeviction
+    ports:
+      # Host-side bind address, NOT 0.0.0.0. See TRANSPORT above.
+      - "${BIND_ADDR:-127.0.0.1}:${CACHE_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "valkey-cli", "-a", "${CACHE_PASSWORD}", "--no-auth-warning", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
