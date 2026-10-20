@@ -5,3 +5,6 @@
 # Local secrets (Hetzner token etc.) — never commit
 .env
 deploy/.materialized/
+
+# A vitest/npx run from the repo root (rather than app/) creates one here.
+node_modules/

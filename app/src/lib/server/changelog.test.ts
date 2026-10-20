@@ -71,3 +71,39 @@ _Unreleased — in progress_
 	expect(entries[0].date).toBe('Unreleased — in progress');
 	expect(entries[0].html).toContain('<li>Some upcoming thing</li>');
 });
+
+// CHANGELOG.md uses *x* and _x_ for emphasis; the renderer only knew **bold**,
+// so the live page printed "region's *latest* check" with the asterisks.
+test('single-asterisk and underscore emphasis render as <em>, code and identifiers untouched', () => {
+	const md = `## v0.2.0
+
+_2026-08-30_
+
+- each region's *latest* check, Persian for _pulse_
+- **bold** still bold, \`PB_URL_X\` and \`a*b*c\` stay literal, snake_case_name too
+`;
+	const html = parseChangelog(md)[0].html;
+	expect(html).toContain("region's <em>latest</em> check");
+	expect(html).toContain('Persian for <em>pulse</em>');
+	expect(html).toContain('<strong>bold</strong>');
+	expect(html).toContain('<code>PB_URL_X</code>');
+	expect(html).toContain('<code>a*b*c</code>');
+	expect(html).toContain('snake_case_name');
+	expect(html).not.toMatch(/\*latest\*|_pulse_/);
+});
+
+// The page renders entries with {@html}, and a link URL is allowed to contain
+// `"`: before #567 it closed the href and the rest became attributes.
+test('a quote in a link URL cannot break out of the href', () => {
+	const md = `## v0.2.1
+
+- see [docs](https://a.example/"onmouseover="alert(1)) and a "quoted" word
+`;
+	const html = parseChangelog(md)[0].html;
+	const doc = new DOMParser().parseFromString(html, 'text/html');
+	const links = [...doc.querySelectorAll('a')];
+	expect(links).toHaveLength(1);
+	expect(links[0].getAttributeNames().sort()).toEqual(['href', 'rel']);
+	expect(links[0].getAttribute('href')).toBe('https://a.example/"onmouseover="alert(1');
+	expect(doc.body.textContent).toContain('a "quoted" word');
+});

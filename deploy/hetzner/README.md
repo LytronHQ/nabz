@@ -1,6 +1,6 @@
 # Hetzner Cloud provisioning
 
-Creates the **production fleet** the launch checklist needs — three VPSes — using
+Creates the **production fleet** the launch checklist needs — four VPSes — using
 plain bash against the Hetzner Cloud API. Same philosophy as everything else in
 `deploy/`: no Terraform/Ansible, config from env, idempotent, re-runnable. This
 step only *creates the servers*; the deploy itself is still
@@ -14,23 +14,32 @@ step only *creates the servers*; the deploy itself is still
 | `nabz-pocketbase` | Falkenstein (`fsn1`) | datastore + auth | — |
 | `nabz-evaluator` | Falkenstein (`fsn1`) | incidents / rollups / alerts | — |
 | `nabz-worker-eu-central-1` | Falkenstein (`fsn1`) | probe zone | `eu-central` |
+| `nabz-worker-ap-southeast-1` | Singapore (`sin`) | probe zone, **public** | `ap-southeast` |
 
-**One probe zone for now — a known limitation, not an oversight.** A second
-region is genuinely wanted: with a single zone, consensus
+**Two probe zones**, because with a single zone consensus
 (`evaluator/consensus.go`) has nothing to outvote a bad network path with, so it
 falls back to the N-consecutive-failures rule instead of cross-zone agreement,
 and a local blip can look like a real outage.
 
-It is one zone because the `cx` line we buy is **EU-only** (`fsn1`/`hel1`/`nbg1`)
-and the US/APAC alternatives are ~3x the price — `cpx11` in Ashburn is €17.49/mo
-against €5.49 for a `cx23`. A second zone goes in when Hetzner sells a
-comparable plan in those locations; there is no interim US VM. `provision.sh`'s
-preflight refuses loudly if `SERVER_TYPE` isn't sold where a fleet entry wants
-it, so this can't be half-done by accident.
+The Singapore worker ([#498](https://github.com/LytronHQ/nabz-internal/issues/498))
+differs from the rest in two ways:
 
-The zone code is `eu-central`, matching Hetzner's own `network_zone` for
-Falkenstein/Nuremberg/Helsinki — the codes stay aligned with the provider's
-labelling rather than inventing a parallel geography.
+- **Its own server type.** The `cx` line is **EU-only** (`fsn1`/`hel1`/`nbg1`), so
+  its `FLEET` entry names `cpx02` (1 vCPU / 1 GB; the worker image builds in it
+  without swap). Every other entry uses `SERVER_TYPE`. The preflight refuses
+  loudly if any entry's type isn't sold where it wants it.
+- **No private network.** A Hetzner network lives in one network zone, and ours
+  is `eu-central`, so a `sin` server cannot join it. `provision.sh` creates it with
+  no network and no placement group, and prints it in `NODES` as
+  `worker <ip> ap-southeast public`. `remote-deploy.sh` then gives it
+  `https://$PB_HOSTNAME` — the tunnel, behind Cloudflare Access — and its own
+  service token (`WORKER_CF_ACCESS_*`, minted by `infra-access` on the same policy
+  as the web's), instead of PocketBase's private address.
+
+Zone codes match Hetzner's own `network_zone` — `eu-central` for
+Falkenstein/Nuremberg/Helsinki, `ap-southeast` for Singapore — so they stay
+aligned with the provider's labelling rather than inventing a parallel geography.
+`FLEET` is shared by every environment, so staging gets a Singapore worker too.
 
 **Naming convention** (aligns with the zone-identity model): worker servers are
 `nabz-worker-<zone_code>-<n>`, where `<n>` is a **per-zone** index starting at 1
@@ -54,7 +63,7 @@ into it. Zone display names ("EU") live in the DB, not here.
 ## Usage
 
 ```bash
-# create (or find) all three servers, then print the NODES block
+# create (or find) all four servers, then print the NODES block
 HCLOUD_TOKEN=…  SSH_PRIVATE_KEY="$(cat ~/.ssh/id_hetzner)"  ./deploy/hetzner/provision.sh
 
 # tear it all down again
@@ -83,7 +92,7 @@ if it dies, every worker stops probing at once. Public IPs give each node its ow
 independent path out, which for a monitoring product is the safer failure mode,
 and it is cheaper than a gateway at roughly €0.50/mo per address.
 
-Nothing is exposed by having one. [`harden.sh`](../harden.sh) runs `ufw` with SSH
+Nothing is exposed by having one. [`server.sh harden`](../server.sh) runs `ufw` with SSH
 as the only inbound port, key-only, plus `fail2ban` and unattended-upgrades;
 PocketBase is reached through the Cloudflare Tunnel, which is an outbound
 connection. A public IP is a way *out*, not a way in.
@@ -125,7 +134,7 @@ when no outbound rule is set.
 opened in the console is closed again) and deletes any other firewall under the
 prefix. Two firewalls on one server **union** their rules, so a stale one widens
 the surface rather than being ignored. This is on-host `ufw` (via
-[`../harden.sh`](../harden.sh)) *plus* a cloud firewall, not instead of it.
+[`server.sh harden`](../server.sh)) *plus* a cloud firewall, not instead of it.
 
 ## The PocketBase data volume
 
@@ -150,8 +159,8 @@ later is a live operation, which is the point of using one.
    to the boot disk.
 2. `deploy-nodes` (or `./deploy/remote-deploy.sh <env>`) — installs Docker, ships the code, and brings
    each role up. Hardening (ufw, unattended-upgrades, fail2ban, key-only SSH)
-   runs on-host via [`../harden.sh`](../harden.sh) as part of that deploy, so it
+   runs on-host via [`server.sh harden`](../server.sh) as part of that deploy, so it
    is **not** duplicated here.
 
-> Defence in depth: on-host `ufw` (via `harden.sh`) **and** the Hetzner Cloud
+> Defence in depth: on-host `ufw` (via `server.sh harden`) **and** the Hetzner Cloud
 > firewall above. Both allow only inbound SSH; all monitoring traffic is outbound.

@@ -56,7 +56,9 @@ describe('getAvailabilityOverview 24h (#398)', () => {
 		// 100 checks all up in closed buckets + 100 all down in the current hour
 		// must be 50%, not the 0% or 100% you would get by letting one win.
 		const { pb } = fakePb({
-			hourRollups: [{ bucket_start: '2026-08-30 14:00:00.000Z', uptime_pct: 100, check_count: 100 }],
+			hourRollups: [
+				{ bucket_start: '2026-08-30 14:00:00.000Z', uptime_pct: 100, check_count: 100 }
+			],
 			checksTotal: 100,
 			checksUp: 0
 		});

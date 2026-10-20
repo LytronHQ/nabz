@@ -1,3 +1,4 @@
+import type { ClientResponseError } from 'pocketbase';
 import type { PageServerLoad } from './$types';
 
 type OutputType = {
@@ -12,8 +13,8 @@ export const load: PageServerLoad<OutputType> = async ({ locals, params }) => {
 			success: true,
 			message: 'Successfully verified your email address. You can now login.'
 		};
-	} catch (err: any) {
-		switch (err.status) {
+	} catch (err) {
+		switch ((err as ClientResponseError).status) {
 			case 400:
 				return {
 					success: false,
@@ -22,7 +23,8 @@ export const load: PageServerLoad<OutputType> = async ({ locals, params }) => {
 			case 403:
 				return {
 					success: false,
-					message: err.response.message ?? 'Unable to verify, please try again.'
+					message:
+						(err as ClientResponseError).response.message ?? 'Unable to verify, please try again.'
 				};
 
 			default:

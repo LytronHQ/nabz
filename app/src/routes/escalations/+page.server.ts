@@ -1,8 +1,8 @@
 import { redirect } from '@sveltejs/kit';
 import type { PageServerLoad } from './$types';
-import { DefaultPageSize } from '$lib/constants';
-import { AlertChannelItem } from '$lib/models/alert-channel';
-import { channelDisplayName } from '$lib/utils/channel-display';
+import { DefaultPageSize } from '#lib/constants.js';
+import { AlertChannelItem } from '#lib/models/alert-channel.js';
+import { channelDisplayName } from '#lib/utils/channel-display.js';
 
 export const load: PageServerLoad = async ({ locals, url }) => {
 	if (!locals.user) {

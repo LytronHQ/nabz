@@ -92,10 +92,7 @@ describe('getFleetUptime24h', () => {
 
 describe('scheduledCheckRate', () => {
 	const live = [zoneStat('eu', true)];
-	const twoLive = [
-		zoneStat('eu', true),
-		zoneStat('us', true)
-	];
+	const twoLive = [zoneStat('eu', true), zoneStat('us', true)];
 
 	test('unassigned monitors scale with the number of zones', () => {
 		// 60/60 per zone × 2 zones = 2/min

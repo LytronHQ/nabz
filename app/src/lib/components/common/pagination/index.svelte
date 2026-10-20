@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type PaginationData from '$lib/models/pagination-data';
+	import type PaginationData from '#lib/models/pagination-data.js';
 
 	interface Props {
 		data: PaginationData;

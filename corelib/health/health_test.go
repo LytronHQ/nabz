@@ -39,7 +39,7 @@ func downDep(name string, err error) Dependency {
 }
 
 func TestPublicNodeBody_HidesEverythingButStatus(t *testing.T) {
-	s := &Server{Name: "worker-eu", Token: testToken, Deps: []Dependency{okDep("valkey"), okDep("pocketbase")}}
+	s := &Server{Name: "worker-eu", Token: testToken, Deps: []Dependency{okDep("smtp"), okDep("pocketbase")}}
 
 	rec := hit(t, s, "/health", "")
 	if rec.Code != http.StatusOK {
@@ -50,7 +50,7 @@ func TestPublicNodeBody_HidesEverythingButStatus(t *testing.T) {
 		t.Errorf("want status ok, got %v", m["status"])
 	}
 	// A per-node public body reveals only status — no node name, no dep list.
-	for _, leak := range []string{"node", "items", "dependencies", "unhealthy", "valkey", "pocketbase"} {
+	for _, leak := range []string{"node", "items", "dependencies", "unhealthy", "smtp", "pocketbase"} {
 		if _, ok := m[leak]; ok {
 			t.Errorf("public node body leaked field %q: %v", leak, m)
 		}
@@ -58,7 +58,7 @@ func TestPublicNodeBody_HidesEverythingButStatus(t *testing.T) {
 }
 
 func TestDegradedReturns503(t *testing.T) {
-	s := &Server{Name: "worker-eu", Deps: []Dependency{okDep("pocketbase"), downDep("valkey", errors.New("boom"))}}
+	s := &Server{Name: "worker-eu", Deps: []Dependency{okDep("pocketbase"), downDep("smtp", errors.New("boom"))}}
 	rec := hit(t, s, "/health", "")
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("degraded node: want 503, got %d", rec.Code)
@@ -71,13 +71,13 @@ func TestDegradedReturns503(t *testing.T) {
 // The central scrubbing guarantee: a raw driver error carrying an address and
 // credentials must never surface — only the generic "unreachable" label.
 func TestScrubbing_RawErrorNeverLeaks(t *testing.T) {
-	raw := errors.New("dial tcp 10.1.2.3:6379: connect: connection refused (auth: user=admin password=hunter2, redis://admin:hunter2@valkey.internal:6379)")
-	s := &Server{Name: "worker-eu", Token: testToken, Deps: []Dependency{downDep("valkey", raw)}}
+	raw := errors.New("dial tcp 10.1.2.3:587: connect: connection refused (auth: user=admin password=hunter2, smtp://admin:hunter2@mail.internal:587)")
+	s := &Server{Name: "worker-eu", Token: testToken, Deps: []Dependency{downDep("smtp", raw)}}
 
 	// Even on the DEBUG tier (most detail), nothing sensitive appears.
 	rec := hit(t, s, "/health", "Bearer "+testToken)
 	body := rec.Body.String()
-	for _, secret := range []string{"10.1.2.3", "6379", "hunter2", "admin", "redis://", "valkey.internal", "connection refused", "dial tcp"} {
+	for _, secret := range []string{"10.1.2.3", "587", "hunter2", "admin", "smtp://", "mail.internal", "connection refused", "dial tcp"} {
 		if strings.Contains(body, secret) {
 			t.Errorf("debug body leaked sensitive substring %q\nbody: %s", secret, body)
 		}
@@ -89,7 +89,7 @@ func TestScrubbing_RawErrorNeverLeaks(t *testing.T) {
 }
 
 func TestDebugTier_TokenGating(t *testing.T) {
-	s := &Server{Name: "worker-eu", Token: testToken, Deps: []Dependency{downDep("valkey", errors.New("x"))}}
+	s := &Server{Name: "worker-eu", Token: testToken, Deps: []Dependency{downDep("smtp", errors.New("x"))}}
 
 	cases := []struct {
 		name       string
@@ -249,7 +249,7 @@ func TestBuildInfo_DebugOnlyAndOmittedWhenUnset(t *testing.T) {
 
 func TestNoAggregate_NoAllRoute(t *testing.T) {
 	// A worker (no Aggregate) must not expose /health/all at all.
-	s := &Server{Name: "worker-eu", Deps: []Dependency{okDep("valkey")}}
+	s := &Server{Name: "worker-eu", Deps: []Dependency{okDep("smtp")}}
 	rec := hit(t, s, "/health/all", "")
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("worker should not serve /health/all, got %d", rec.Code)

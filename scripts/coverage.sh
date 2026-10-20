@@ -5,8 +5,9 @@
 #   ./scripts/coverage.sh          # print the current numbers
 #   ./scripts/coverage.sh --write  # rewrite the README's coverage badges in place
 #
-# CI runs `--write` on merge to main and commits the refreshed badges, so they
-# stay current automatically; run it by hand for a local preview. Uses the repo's
+# CI runs `--write` on merge to main only to warn when the badges are stale; it
+# cannot commit them, because main takes changes only through a PR (#646). Run
+# `--write` here and commit README.md in a PR to refresh them. Uses the repo's
 # toolchains — vitest (@vitest/coverage-v8) + `go test -cover`. No extra deps.
 set -uo pipefail
 cd "$(dirname "$0")/.."

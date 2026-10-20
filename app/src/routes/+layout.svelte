@@ -1,10 +1,13 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
 
-	import { UserNav } from '$lib/components/common/user-nav';
-	import { Toaster } from '$lib/components/common';
+	import { UserNav } from '#lib/components/common/user-nav/index.js';
+	import { Toaster } from '#lib/components/common/index.js';
+	import { UpdateBanner } from '#lib/components/common/update-banner/index.js';
 	import { afterNavigate } from '$app/navigation';
-	import { browser } from '$app/environment';
+	import { browser } from '$app/env';
+	import { onMount } from 'svelte';
+	import { watchThemeColor } from '#lib/utils/window-chrome.js';
 	import '../app.css';
 
 	let { data, children } = $props();
@@ -14,10 +17,19 @@
 	// static column; below the breakpoint it slides in over a backdrop, opened by the
 	// mobile top-bar hamburger and closed on navigate / Escape / backdrop tap.
 	let navOpen = $state(false);
-	afterNavigate(() => (navOpen = false));
+
+	afterNavigate(({ shallow, type }) => {
+		if (shallow && type === 'goto') return;
+
+		return (navOpen = false);
+	});
+
 	function onKeydown(e: KeyboardEvent) {
 		if (e.key === 'Escape') navOpen = false;
 	}
+	// The installed app's window buttons take the strip's colour (#635).
+	onMount(() => watchThemeColor());
+
 	// Lock background scroll while the drawer is open.
 	$effect(() => {
 		if (browser) document.body.style.overflow = navOpen ? 'hidden' : '';
@@ -27,6 +39,25 @@
 <svelte:window onkeydown={onKeydown} />
 
 <Toaster />
+<UpdateBanner />
+
+<!-- The installed app's own title bar (desktop "window controls overlay"): the
+     browser's bar is gone and the window buttons sit over this strip, which can
+     be dragged to move the window. Hidden everywhere else. On every page, signed
+     in or not, or a signed-out window could not be moved. -->
+<div class="app-titlebar" aria-hidden="true">
+	<span class="mark">
+		<svg
+			viewBox="0 0 24 24"
+			fill="none"
+			stroke="#fff"
+			stroke-width="2.4"
+			stroke-linecap="round"
+			stroke-linejoin="round"><path d="M3 12h4l2.5-7 5 14 2.5-7H21"></path></svg
+		>
+	</span>
+	<b>nabz</b>
+</div>
 
 {#if user}
 	<div class="app-shell" class:nav-open={navOpen}>
@@ -43,20 +74,20 @@
 					fill="none"
 					stroke="currentColor"
 					stroke-width="2"
-					stroke-linecap="round"><path d="M3 6h18M3 12h18M3 18h18" /></svg
+					stroke-linecap="round"><path d="M3 6h18M3 12h18M3 18h18"></path></svg
 				>
 			</button>
-			<a class="brand" href={resolve('/dashboard')}>
-				<span class="mark"
-					><svg
+			<a class="brand" href={resolve('dashboard')}>
+				<span class="mark">
+					<svg
 						viewBox="0 0 24 24"
 						fill="none"
 						stroke="#fff"
 						stroke-width="2.4"
 						stroke-linecap="round"
-						stroke-linejoin="round"><path d="M3 12h4l2.5-7 5 14 2.5-7H21" /></svg
-					></span
-				>
+						stroke-linejoin="round"><path d="M3 12h4l2.5-7 5 14 2.5-7H21"></path></svg
+					>
+				</span>
 				<b>nabz</b>
 			</a>
 		</header>

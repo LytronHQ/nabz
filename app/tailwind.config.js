@@ -1,4 +1,5 @@
-const plugin = require('tailwindcss/plugin');
+import plugin from 'tailwindcss/plugin';
+import forms from '@tailwindcss/forms';
 
 // Loaded by app.css through `@config` (Tailwind 4). Only the theme and the forms
 // plugin remain here:
@@ -112,7 +113,7 @@ export default {
 		}
 	},
 	plugins: [
-		require('@tailwindcss/forms')({
+		forms({
 			strategy: 'base'
 		}),
 		plugin(function ({ addBase }) {

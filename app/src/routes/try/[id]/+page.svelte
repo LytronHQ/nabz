@@ -13,10 +13,10 @@
 
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { invalidateAll } from '$app/navigation';
-	import { Meta, Pill } from '$lib/components/common';
-	import type { PillTone } from '$lib/components/common/pill';
-	import { usePoll } from '$lib/utils/use-poll';
+	import { refreshAll } from '$app/navigation';
+	import { Meta, Pill } from '#lib/components/common/index.js';
+	import type { PillTone } from '#lib/components/common/pill/index.js';
+	import { usePoll } from '#lib/utils/use-poll.js';
 
 	let { data } = $props();
 
@@ -27,7 +27,7 @@
 		const t = setInterval(() => (now = Date.now()), 1000);
 		return () => clearInterval(t);
 	});
-	usePoll(invalidateAll, 8000);
+	usePoll(refreshAll, 8000);
 
 	const TONE: Record<string, PillTone> = {
 		up: 'up',
@@ -46,8 +46,8 @@
 	const locked = [
 		{ title: 'Response-time chart', hint: 'DNS · connect · TLS · transfer, per check' },
 		{ title: 'Uptime history', hint: 'Today · 7d · 30d · 365d · all-time' },
-		{ title: 'Multi-region checks', hint: 'Confirmed across eu · us before it calls down' },
-		{ title: 'Alerts', hint: 'Slack, Telegram, Discord, email, PagerDuty, webhook' }
+		{ title: 'Multi-region checks', hint: 'Confirmed across Europe and Asia before it calls down' },
+		{ title: 'Alerts', hint: 'Push, Slack, Telegram, Discord, email, PagerDuty, webhook' }
 	];
 	let { expired, monitor } = $derived(data);
 	let tone = $derived((monitor && TONE[monitor.status]) || 'pending');
@@ -73,9 +73,9 @@
 				stroke="#fff"
 				stroke-width="2.4"
 				stroke-linecap="round"
-				stroke-linejoin="round"><path d="M3 12h4l2.5-7 5 14 2.5-7H21" /></svg
-			></span
-		>
+				stroke-linejoin="round"><path d="M3 12h4l2.5-7 5 14 2.5-7H21"></path></svg
+			>
+		</span>
 		<b>nabz</b>
 	</a>
 
@@ -87,7 +87,7 @@
 				that sticks around — and unlock history, multi-region checks, and alerts.
 			</p>
 			<div class="cta">
-				<a class="btn btn-primary" href={resolve('/signup')}>Create a free account</a>
+				<a class="btn btn-primary" href={resolve('signup')}>Create a free account</a>
 				<a class="btn btn-ghost" href={resolve('/')}>Back to home</a>
 			</div>
 		</div>
@@ -99,8 +99,8 @@
 				<span class="keep-sub">Sign up to keep it — expires in <b>{countdown}</b>.</span>
 			</div>
 			<div class="cta">
-				<a class="btn btn-primary" href={resolve('/signup')}>Sign up to keep it</a>
-				<a class="btn btn-ghost" href={resolve('/signin')}>Sign in</a>
+				<a class="btn btn-primary" href={resolve('signup')}>Sign up to keep it</a>
+				<a class="btn btn-ghost" href={resolve('signin')}>Sign in</a>
 			</div>
 		</div>
 
@@ -148,10 +148,11 @@
 							stroke-width="1.8"
 							stroke-linecap="round"
 							stroke-linejoin="round"
-							><rect x="4" y="11" width="16" height="9" rx="2" /><path
-								d="M8 11V7a4 4 0 0 1 8 0v4"
-							/></svg
 						>
+							<rect x="4" y="11" width="16" height="9" rx="2"></rect>
+							<path d="M8 11V7a4 4 0 0 1 8 0v4"></path>
+						</svg>
+
 						<div class="locked-title">{w.title}</div>
 						<div class="locked-hint">{w.hint}</div>
 					</div>
@@ -160,8 +161,9 @@
 		</div>
 
 		<p class="foot">
-			Trials run for one hour and are then removed. <a href={resolve('/signup')}>Sign up</a> any time
-			to keep this one.
+			Trials run for one hour and are then removed.
+			<a href={resolve('signup')}>Sign up</a>
+			any time to keep this one.
 		</p>
 	{/if}
 </div>

@@ -3,7 +3,7 @@ import { render, screen, within } from '@testing-library/svelte';
 
 import Test from './index.test.svelte';
 import Form from './index.svelte';
-import { MonitorNewItem } from '$lib/models/monitor';
+import { MonitorNewItem } from '#lib/models/monitor.js';
 
 test('renders inline validation messages from the errors prop', () => {
 	render(Form, {

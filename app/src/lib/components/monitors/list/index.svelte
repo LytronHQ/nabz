@@ -1,9 +1,9 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
-	import type { MonitorItem } from '$lib/models/monitor';
-	import type { EntityIdType } from '$lib/constants';
-	import { Icon, StatusBadge } from '$lib/components/common';
-	import { formatUptime, formatRelativeTime, isInMaintenance } from '$lib/utils/format-utils';
+	import type { MonitorItem } from '#lib/models/monitor.js';
+	import type { EntityIdType } from '#lib/constants.js';
+	import { Icon, StatusBadge } from '#lib/components/common/index.js';
+	import { formatUptime, formatRelativeTime, isInMaintenance } from '#lib/utils/format-utils.js';
 
 	interface Props {
 		data: MonitorItem[];

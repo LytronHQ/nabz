@@ -1,6 +1,6 @@
-import type { ListResult, RecordModel } from 'pocketbase';
+import type { ListResult } from 'pocketbase';
 import { z } from 'zod';
-import { type EntityIdType } from '$lib/constants';
+import { type EntityIdType } from '#lib/constants.js';
 import { type IBaseEntity, BaseEntityList, BaseEntityValidator, PaginationData } from './';
 
 export const AlertChannelTypes = [
@@ -9,7 +9,8 @@ export const AlertChannelTypes = [
 	'slack',
 	'telegram',
 	'discord',
-	'pagerduty'
+	'pagerduty',
+	'push'
 ] as const;
 export type AlertChannelType = (typeof AlertChannelTypes)[number];
 
@@ -21,6 +22,11 @@ export interface ChannelSettings {
 	botToken: string; // telegram
 	chatId: string; // telegram
 	routingKey: string; // pagerduty
+	// push: one device's PushSubscription (#602) — the push service endpoint and
+	// the keys the evaluator encrypts each alert to.
+	endpoint: string;
+	p256dh: string;
+	auth: string;
 }
 
 const schema = z
@@ -31,7 +37,10 @@ const schema = z
 		url: z.string().optional().default(''),
 		botToken: z.string().optional().default(''),
 		chatId: z.string().optional().default(''),
-		routingKey: z.string().optional().default('')
+		routingKey: z.string().optional().default(''),
+		endpoint: z.string().optional().default(''),
+		p256dh: z.string().optional().default(''),
+		auth: z.string().optional().default('')
 	})
 	// Each type validates only its own fields.
 	.superRefine((val, ctx) => {
@@ -85,26 +94,55 @@ const schema = z
 			case 'pagerduty':
 				require('routingKey', 'Integration routing key is required');
 				break;
+			case 'push':
+				// The three come together from pushManager.subscribe(); one message
+				// for the lot, since the user never types any of them.
+				if (
+					require('endpoint', 'Turn on notifications on this device first') &&
+					require('p256dh', 'Turn on notifications on this device first') &&
+					require('auth', 'Turn on notifications on this device first')
+				)
+					match('endpoint', /^https:\/\//, 'The push subscription endpoint must be https');
+				break;
 		}
 	});
 
 export type IAlertChannelItem = z.infer<typeof schema>;
 
-function toBool(value: any): boolean {
+// What the constructors read from: a PocketBase record (per-type settings in the
+// nested `config`, or a legacy `target` string), an item being copied, or flat
+// form fields.
+export interface AlertChannelInput extends Partial<ChannelSettings> {
+	id?: EntityIdType;
+	type?: AlertChannelType;
+	name?: string;
+	enabled?: boolean;
+	config?: Partial<ChannelSettings> | null;
+	target?: string;
+}
+
+function toInput(data: FormData | AlertChannelInput | null | undefined): AlertChannelInput {
+	return data instanceof FormData ? (Object.fromEntries(data) as AlertChannelInput) : (data ?? {});
+}
+
+function toBool(value: unknown): boolean {
 	return value === true || value === 'true' || value === 1 || value === '1';
 }
 
 // channelSettings resolves the per-type fields from any source: a submitted form
 // (flat fields), a PocketBase record (nested `config`), or a legacy record that
 // stored everything in the single `target` string.
-function channelSettings(item: any): ChannelSettings {
+function channelSettings(item: AlertChannelInput): ChannelSettings {
 	const cfg = item.config ?? {};
 	const s: ChannelSettings = {
 		email: item.email ?? cfg.email ?? '',
 		url: item.url ?? cfg.url ?? '',
 		botToken: item.botToken ?? cfg.botToken ?? '',
 		chatId: item.chatId ?? cfg.chatId ?? '',
-		routingKey: item.routingKey ?? cfg.routingKey ?? ''
+		routingKey: item.routingKey ?? cfg.routingKey ?? '',
+		endpoint: item.endpoint ?? cfg.endpoint ?? '',
+		p256dh: item.p256dh ?? cfg.p256dh ?? '',
+		auth: item.auth ?? cfg.auth ?? ''
 	};
 	// Legacy channels predate `config` and kept their destination in `target`.
 	const target: string = item.target ?? '';
@@ -151,6 +189,8 @@ export function toChannelConfig(
 			return { botToken: item.botToken, chatId: item.chatId };
 		case 'pagerduty':
 			return { routingKey: item.routingKey };
+		case 'push':
+			return { endpoint: item.endpoint, p256dh: item.p256dh, auth: item.auth };
 		default:
 			return {};
 	}
@@ -166,9 +206,12 @@ export class AlertChannelItem implements IBaseEntity, ChannelSettings {
 	botToken: string;
 	chatId: string;
 	routingKey: string;
+	endpoint: string;
+	p256dh: string;
+	auth: string;
 
-	constructor(data: FormData | RecordModel | any) {
-		const item = data instanceof FormData ? Object.fromEntries(data) : (data ?? {});
+	constructor(data: FormData | AlertChannelInput | null | undefined) {
+		const item = toInput(data);
 		const s = channelSettings(item);
 		this.id = item.id;
 		this.type = item.type ?? 'webhook';
@@ -179,6 +222,9 @@ export class AlertChannelItem implements IBaseEntity, ChannelSettings {
 		this.botToken = s.botToken;
 		this.chatId = s.chatId;
 		this.routingKey = s.routingKey;
+		this.endpoint = s.endpoint;
+		this.p256dh = s.p256dh;
+		this.auth = s.auth;
 	}
 }
 
@@ -191,10 +237,13 @@ export class AlertChannelNewItem implements ChannelSettings {
 	botToken: string;
 	chatId: string;
 	routingKey: string;
+	endpoint: string;
+	p256dh: string;
+	auth: string;
 
-	constructor(data: FormData | RecordModel | any = null) {
+	constructor(data: FormData | AlertChannelInput | null = null) {
 		const fromForm = data instanceof FormData;
-		const item = fromForm ? Object.fromEntries(data) : (data ?? {});
+		const item = toInput(data);
 		const s = channelSettings(item);
 		this.type = item.type ?? 'webhook';
 		this.name = (item.name ?? '').trim();
@@ -204,6 +253,9 @@ export class AlertChannelNewItem implements ChannelSettings {
 		this.botToken = s.botToken;
 		this.chatId = s.chatId;
 		this.routingKey = s.routingKey;
+		this.endpoint = s.endpoint;
+		this.p256dh = s.p256dh;
+		this.auth = s.auth;
 	}
 }
 
@@ -215,23 +267,23 @@ export class AlertChannelItemValidator extends BaseEntityValidator {
 
 export class AlertChannelsList extends BaseEntityList<AlertChannelItem> {
 	constructor(data: AlertChannelsList);
-	constructor(data: ListResult<RecordModel> | any) {
+	constructor(data: AlertChannelsList | ListResult<AlertChannelInput>) {
 		super(
 			data instanceof AlertChannelsList
 				? data.items
-				: data.items.map((it: any) => new AlertChannelItem(it)),
+				: data.items.map((it) => new AlertChannelItem(it)),
 			data instanceof AlertChannelsList
 				? new PaginationData(data.pagination)
 				: new PaginationData(data)
 		);
 	}
 
-	add(item: any) {
+	add(item: AlertChannelInput) {
 		super.add(new AlertChannelItem(item));
 		return this;
 	}
 
-	edit(item: any) {
+	edit(item: AlertChannelInput) {
 		super.edit(new AlertChannelItem(item));
 		return this;
 	}

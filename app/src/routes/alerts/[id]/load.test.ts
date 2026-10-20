@@ -1,7 +1,17 @@
 import { test, expect } from 'vitest';
 import { load } from './+page.server';
 
-function fakeLocals(user: any, opts: { channel?: any; eventList?: any } = {}) {
+// The fakes stub only what load touches, so the event is a deliberate partial.
+type LoadEvent = Parameters<typeof load>[0];
+type LoadData = Exclude<Awaited<ReturnType<typeof load>>, void>;
+const run = async (event: object) => (await load(event as LoadEvent)) as LoadData;
+
+type FakeList = { items: object[]; page: number; perPage: number; totalItems: number };
+
+function fakeLocals(
+	user: { id: string } | null,
+	opts: { channel?: object; eventList?: FakeList } = {}
+) {
 	const { channel, eventList } = opts;
 	return {
 		user,
@@ -15,7 +25,7 @@ function fakeLocals(user: any, opts: { channel?: any; eventList?: any } = {}) {
 }
 
 test('returns the channel + paginated delivery log for the owner', async () => {
-	const res: any = await load({
+	const res = await run({
 		locals: fakeLocals(
 			{ id: 'u1' },
 			{
@@ -30,7 +40,7 @@ test('returns the channel + paginated delivery log for the owner', async () => {
 		),
 		params: { id: 'ch1' },
 		url: new URL('http://x/alerts/ch1')
-	} as any);
+	});
 	expect(res.channel.id).toBe('ch1');
 	expect(res.events).toHaveLength(1);
 	expect(res.pagination.totalItems).toBe(12);
@@ -38,13 +48,13 @@ test('returns the channel + paginated delivery log for the owner', async () => {
 
 test('404s a channel owned by someone else', async () => {
 	await expect(
-		load({
+		run({
 			locals: fakeLocals(
 				{ id: 'u1' },
 				{ channel: { id: 'ch1', user: 'someone-else', type: 'email' } }
 			),
 			params: { id: 'ch1' },
 			url: new URL('http://x/alerts/ch1')
-		} as any)
+		})
 	).rejects.toMatchObject({ status: 404 });
 });

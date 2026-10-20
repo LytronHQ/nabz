@@ -1,5 +1,5 @@
-import { json, type RequestHandler } from '@sveltejs/kit';
-import { failIfNoId, failIfNoUser } from '$lib/utils/api-utils';
+import type { RequestHandler } from '@sveltejs/kit';
+import { failIfNoId, failIfNoUser } from '#lib/utils/api-utils.js';
 
 // POST /api/incidents/:id/action  { action: "acknowledge" | "escalate" }
 // Records an acknowledgement or escalation on an incident (owner only) and adds a
@@ -16,7 +16,7 @@ export const POST: RequestHandler = async ({ locals, params: { id }, request }) 
 		action = '';
 	}
 	if (action !== 'acknowledge' && action !== 'escalate') {
-		return json({ error: 'Invalid action' }, { status: 400 });
+		return Response.json({ error: 'Invalid action' }, { status: 400 });
 	}
 
 	// Ownership: the incident's monitor must belong to the user.
@@ -24,10 +24,10 @@ export const POST: RequestHandler = async ({ locals, params: { id }, request }) 
 	try {
 		inc = await locals.pb!.collection('incidents').getOne(id, { expand: 'monitor' });
 	} catch {
-		return json({ error: 'Incident not found' }, { status: 404 });
+		return Response.json({ error: 'Incident not found' }, { status: 404 });
 	}
 	if (inc.expand?.monitor?.user !== locals.user?.id) {
-		return json({ error: 'Incident not found' }, { status: 404 });
+		return Response.json({ error: 'Incident not found' }, { status: 404 });
 	}
 
 	const who = locals.user?.name || locals.user?.email || 'A user';
@@ -36,7 +36,7 @@ export const POST: RequestHandler = async ({ locals, params: { id }, request }) 
 	try {
 		if (action === 'acknowledge') {
 			if (inc.acknowledged_at) {
-				return json({ error: 'Already acknowledged' }, { status: 409 });
+				return Response.json({ error: 'Already acknowledged' }, { status: 409 });
 			}
 			await locals.pb!.collection('incidents').update(id, {
 				acknowledged_at: nowIso,
@@ -64,10 +64,10 @@ export const POST: RequestHandler = async ({ locals, params: { id }, request }) 
 		}
 	} catch (err) {
 		console.warn('incident action failed:', err);
-		return json({ error: 'Action failed' }, { status: 500 });
+		return Response.json({ error: 'Action failed' }, { status: 500 });
 	}
 
-	return json({
+	return Response.json({
 		ok: true,
 		acknowledged_at: action === 'acknowledge' ? nowIso : inc.acknowledged_at || null,
 		acknowledged_by: action === 'acknowledge' ? who : inc.acknowledged_by || '',

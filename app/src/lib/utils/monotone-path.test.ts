@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { monotoneSegments, forwardPath, reversePath, type Point, type Segment } from './monotone-path';
+import {
+	monotoneSegments,
+	forwardPath,
+	reversePath,
+	type Point,
+	type Segment
+} from './monotone-path';
 
 /** Evaluate a cubic Bézier at t. */
 function at(s: Segment, t: number): Point {

@@ -13,8 +13,7 @@ export type ChangePasswordInput = {
 };
 
 export type ChangePasswordResult =
-	| { ok: true; reauthenticated: boolean }
-	| { ok: false; error: unknown };
+	{ ok: true; reauthenticated: boolean } | { ok: false; error: unknown };
 
 /** Changes the password and clears the forced-change flag in ONE update.
  *

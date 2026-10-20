@@ -1,10 +1,10 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
 
-	import { invalidateAll } from '$app/navigation';
-	import { usePoll } from '$lib/utils/use-poll';
-	import { Meta, Pill } from '$lib/components/common';
-	import { formatRelativeTime, formatDuration, durationSeconds } from '$lib/utils/format-utils';
+	import { refreshAll } from '$app/navigation';
+	import { usePoll } from '#lib/utils/use-poll.js';
+	import { Meta, Pill } from '#lib/components/common/index.js';
+	import { formatRelativeTime, formatDuration, durationSeconds } from '#lib/utils/format-utils.js';
 
 	let { data } = $props();
 
@@ -17,7 +17,7 @@
 	let lengthSecs = $derived(durationSeconds(incident.started_at, incident.resolved_at, now));
 
 	usePoll(() => (now = Date.now()), 1000);
-	usePoll(() => invalidateAll(), 15000); // pick up resolution
+	usePoll(() => refreshAll(), 15000); // pick up resolution
 
 	function startedAbsolute(s: string): string {
 		const d = new Date(s);
@@ -51,7 +51,7 @@
 				body: JSON.stringify({ action })
 			});
 			if (res.ok) {
-				await invalidateAll();
+				await refreshAll();
 			} else {
 				const e = await res.json().catch(() => ({}));
 				actError = e.error ?? 'Action failed';
@@ -78,7 +78,7 @@
 			});
 			if (res.ok) {
 				comment = '';
-				await invalidateAll();
+				await refreshAll();
 			} else {
 				const e = await res.json().catch(() => ({}));
 				postError = e.error ?? 'Failed to post';
@@ -92,7 +92,7 @@
 
 <Meta title="Incident · {monitor.name}" />
 
-<div class="crumb"><a href={resolve('/incidents')}>← Incidents</a></div>
+<div class="crumb"><a href={resolve('incidents')}>← Incidents</a></div>
 
 <div class="detail-head">
 	<h1>{monitor.name}</h1>
@@ -118,7 +118,7 @@
 					stroke="currentColor"
 					stroke-width="1.9"
 					stroke-linecap="round"
-					stroke-linejoin="round"><path d="M20 6L9 17l-5-5" /></svg
+					stroke-linejoin="round"><path d="M20 6L9 17l-5-5"></path></svg
 				>
 				Acknowledge
 			</button>
@@ -136,7 +136,7 @@
 					stroke="currentColor"
 					stroke-width="1.8"
 					stroke-linecap="round"
-					stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7" /></svg
+					stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"></path></svg
 				>
 				Escalate
 			</button>
@@ -148,7 +148,7 @@
 				stroke="currentColor"
 				stroke-width="1.8"
 				stroke-linecap="round"
-				stroke-linejoin="round"><path d="M3 12h3l2-6 4 12 2.5-7 1.5 3H21" /></svg
+				stroke-linejoin="round"><path d="M3 12h3l2-6 4 12 2.5-7 1.5 3H21"></path></svg
 			>
 			View monitor
 		</a>
@@ -199,13 +199,21 @@
 				>{monitor.name}</a
 			>
 		</div>
-		<div><span class="k">Type</span><span>{monitor.type}</span></div>
+
 		<div>
-			<span class="k">Checked URL</span><span class="mono" style="word-break:break-all"
-				>{monitor.target}</span
-			>
+			<span class="k">Type</span>
+			<span>{monitor.type}</span>
 		</div>
-		<div><span class="k">Interval</span><span>every {monitor.interval}s</span></div>
+
+		<div>
+			<span class="k">Checked URL</span>
+			<span class="mono" style="word-break:break-all">{monitor.target}</span>
+		</div>
+
+		<div>
+			<span class="k">Interval</span>
+			<span>every {monitor.interval}s</span>
+		</div>
 	</div>
 </div>
 
@@ -223,8 +231,11 @@
 				postComment();
 			}}
 		>
-			<textarea bind:value={comment} rows="2" placeholder="Leave a comment or post-mortem note…"
-			></textarea>
+			<textarea
+				bind:value={comment}
+				rows="2"
+				aria-label="Comment"
+				placeholder="Leave a comment or post-mortem note…"></textarea>
 			<div class="tl-compose__foot">
 				{#if postError}<span class="down-txt" style="font-size:12.5px">{postError}</span>{/if}
 				<button type="submit" class="btn btn-primary" disabled={posting || !comment.trim()}>

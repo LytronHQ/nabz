@@ -2,8 +2,9 @@
 	interface Props {
 		/** numeric series, oldest → newest */
 		data?: number[];
-		/** tone maps to a design token: up | down | pend | paused | accent */
-		tone?: 'up' | 'down' | 'pend' | 'paused' | 'accent';
+		/** tone maps to a design token: up | down | pend | paused | accent; `current`
+		 *  draws in the surrounding text colour, for a container that sets it. */
+		tone?: 'up' | 'down' | 'pend' | 'paused' | 'accent' | 'current';
 		width?: number;
 		height?: number;
 	}
@@ -17,7 +18,7 @@
 		paused: '--paused',
 		accent: '--accent'
 	};
-	let col = $derived(`var(${toneVar[tone] ?? '--accent'})`);
+	let col = $derived(tone === 'current' ? 'currentColor' : `var(${toneVar[tone] ?? '--accent'})`);
 
 	let geom = $derived(
 		(() => {

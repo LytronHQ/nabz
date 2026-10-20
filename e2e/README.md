@@ -1,7 +1,7 @@
 # End-to-end suite (#126)
 
 A full-stack, black-box e2e suite that exercises the app against a **real running
-stack** (PocketBase + worker + evaluator + Valkey + app) and **real-but-sandboxed
+stack** (PocketBase + worker + evaluator + app) and **real-but-sandboxed
 external services** — no mocks. It complements, and does not replace, the fast
 unit tests.
 
@@ -15,17 +15,41 @@ This lands **incrementally**. This directory is built up in that order:
    and the first journeys, which drive the **real** worker → evaluator → PocketBase
    pipeline through the API.
 3. **Browser (UI) journeys** — Playwright page flows (sign in → create a monitor
-   → drive an incident down→up, escalation, maintenance, tags/search). _next._
+   → drive an incident down→up, escalation, maintenance, tags/search). _in progress._
+   `tests/forms.spec.ts` changes fields the way a user does — every alert channel
+   type, the monitor type — and asserts the form follows (#518). Push has no typed
+   fields; its journey checks the device section and the unsubscribed-save error. Journeys that only
+   use a form's default values cannot catch a form that has stopped reacting.
+   `tests/oauth.spec.ts` signs in with GitHub (#609) through PocketBase's real
+   github provider, whose endpoints `setup.sh` points at a fake GitHub in the
+   fixture (`POST /oauth/github/next` picks the identity it hands out). Google is
+   not configured in e2e.
 4. **Real sandboxed channels, one at a time** — Telegram / email / Slack /
-   Discord / webhook / PagerDuty, asserting *actual* delivery. Each
+   Discord / webhook / PagerDuty / push, asserting *actual* delivery (push via the
+   fixture standing in for the push service, decrypted with the device keys). Each
    skips with a clear message when its credential isn't configured, so the suite
    degrades gracefully. Credentials come from CI secrets / a gitignored env file
    (`.env.local`), never committed. _later._
 
 ## The stack
 
+PocketBase is built from `deploy/pocketbase/Dockerfile`, the image production runs,
+at the `PB_VERSION` in `deploy/environments/production.vars` (#613). `setup.sh`
+exports it as `E2E_PB_VERSION`; set that yourself to run the suite on a newer
+PocketBase before upgrading production, and export it for any direct
+`docker compose -f docker-compose.e2e.yml …` (`e2e/setup.sh pb-version` prints it).
+
+Before any spec runs, `global-setup.ts` seeds what several specs read but none
+creates (`seed.ts`, #606): two monitors with a dependency, a resolved incident and
+three days of day rollups for the e2e user. Idempotent, so a reused stack keeps one
+copy. A spec that needs anything else creates it itself.
+
+PocketBase's account emails (verification, password reset, email change) go to
+**mailpit**, a mail catcher in the stack (UI and API on `http://127.0.0.1:8025`);
+`tests/mail.spec.ts` reads them back and follows their links (#627).
+
 `docker-compose.e2e.yml` brings up the whole system on one network — PocketBase,
-Valkey, worker, evaluator, web, and the fixture — so a monitor pointed at
+worker, evaluator, web, and the fixture — so a monitor pointed at
 `http://fixture:8080` is checked by the **real** worker and its status is set by
 the **real** evaluator. `setup.sh` bootstraps PocketBase (superuser, schema
 import, a seeded dashboard user + worker/evaluator service accounts). All creds

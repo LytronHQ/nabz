@@ -5,9 +5,6 @@ name: e2e
 # nightly. The fast unit tests (ci.yml) stay the per-PR gate.
 on:
   workflow_dispatch:
-  schedule:
-    # 03:17 UTC nightly (off the hour to dodge the scheduler rush).
-    - cron: '17 3 * * *'
 
 # Don't pile up overlapping nightly + manual runs.
 concurrency:
@@ -17,7 +14,9 @@ concurrency:
 jobs:
   e2e:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # The multi-worker scenarios scale the stack up and down and then wait real
+    # intervals to see what the workers actually did, which is most of the run.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 

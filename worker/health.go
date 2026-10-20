@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"log"
 
 	"monitors/corelib/health"
@@ -10,10 +9,11 @@ import (
 )
 
 // startHealthServer launches the worker's two-tier HTTP health endpoint unless
-// HEALTH_ADDR is disabled. It probes the same dependencies as the --health-check
-// CLI (Valkey + PocketBase); results are reduced to generic labels, so a response
-// can never leak a connection target or credential.
-func startHealthServer(ctx context.Context, cache *utils.CacheClient, pbClient *pb.Client, zone string) {
+// HEALTH_ADDR is disabled. It probes the same dependency as the --health-check
+// CLI (PocketBase — the worker's only one, now that the schedule lives in the
+// process); the result is reduced to a generic label, so a response can never
+// leak a connection target or credential.
+func startHealthServer(pbClient *pb.Client, zone string) {
 	addr := utils.GetEnv("HEALTH_ADDR", ":8080")
 	if addr == "" || addr == "off" {
 		return
@@ -22,7 +22,6 @@ func startHealthServer(ctx context.Context, cache *utils.CacheClient, pbClient *
 		Name:  "worker-" + zone,
 		Token: utils.GetEnv("HEALTH_DEBUG_TOKEN", ""),
 		Deps: []health.Dependency{
-			{Name: "valkey", Check: func() error { return cache.Ping(ctx) }},
 			{Name: "pocketbase", Check: pbClient.Ping},
 		},
 	}

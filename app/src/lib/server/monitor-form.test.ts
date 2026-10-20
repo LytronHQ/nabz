@@ -1,6 +1,6 @@
 import { test, expect, vi } from 'vitest';
 
-vi.mock('$env/dynamic/private', () => ({ env: { HEALTH_STALE_SECONDS: '90' } }));
+vi.mock('$app/env/private', () => ({ HEALTH_STALE_SECONDS: '90' }));
 
 const { loadMonitorFormOptions } = await import('./monitor-form');
 
@@ -25,7 +25,8 @@ function fakePb(zoneItems: Row[], zoneRows: Row[] = []) {
 
 /** The liveness assertions care about which zones are offered and whether they
  *  are marked stale, not about the label fields alongside them. */
-const liveness = (zones: { zone: string; stale: boolean }[]) => zones.map((z) => ({ zone: z.zone, stale: z.stale }));
+const liveness = (zones: { zone: string; stale: boolean }[]) =>
+	zones.map((z) => ({ zone: z.zone, stale: z.stale }));
 
 test('a zone with a recent heartbeat is offered as live', async () => {
 	const res = await loadMonitorFormOptions(fakePb([{ zone: 'eu', updated: pbTime(10_000) }]), 'u1');
@@ -72,7 +73,15 @@ test('a zone renders its display name while still submitting its code (#311)', a
 	const res = await loadMonitorFormOptions(
 		fakePb(
 			[{ zone: 'eu-central', updated: pbTime(1000) }],
-			[{ code: 'eu-central', display_name: 'EU', group_code: 'eu', group_name: 'Europe', sort_order: 10 }]
+			[
+				{
+					code: 'eu-central',
+					display_name: 'EU',
+					group_code: 'eu',
+					group_name: 'Europe',
+					sort_order: 10
+				}
+			]
 		),
 		'u1'
 	);
@@ -86,7 +95,10 @@ test('a zone renders its display name while still submitting its code (#311)', a
 test('a reporting zone with no zones row still renders, labelled by its code', async () => {
 	// Hiding it would silently drop a region a user may already have monitors
 	// pinned to; an unlabelled zone is only a cosmetic gap.
-	const res = await loadMonitorFormOptions(fakePb([{ zone: 'ap-south', updated: pbTime(1000) }]), 'u1');
+	const res = await loadMonitorFormOptions(
+		fakePb([{ zone: 'ap-south', updated: pbTime(1000) }]),
+		'u1'
+	);
 	expect(res.availableZones).toHaveLength(1);
 	expect(res.availableZones[0].label).toBe('ap-south');
 });

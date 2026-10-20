@@ -13,9 +13,16 @@ function pbDate(d: Date): string {
  * NOTE: this is O(2 queries) per monitor — fine at Phase 2 scale; replaced by
  * pre-computed rollups in Phase 7.
  */
+/**
+ * The checks that count toward uptime (#598): every check except a failure the
+ * worker blamed on its own network (its canaries failed too). A one-zone failure
+ * with healthy canaries still counts: the site was down for that zone.
+ */
+export const COUNTED_CHECKS = 'inconclusive != true';
+
 export async function computeUptime24h(pb: PocketBase, monitorId: string): Promise<number | null> {
 	const since = pbDate(new Date(Date.now() - 24 * HOUR_MS));
-	const base = `monitor="${monitorId}" && checked_at >= "${since}"`;
+	const base = `monitor="${monitorId}" && checked_at >= "${since}" && ${COUNTED_CHECKS}`;
 
 	const total = await pb.collection('checks').getList(1, 1, { filter: base });
 	if (total.totalItems === 0) return null;

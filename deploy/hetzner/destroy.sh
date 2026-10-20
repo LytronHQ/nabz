@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # destroy.sh — delete the nabz production fleet on Hetzner Cloud. The teardown
-# counterpart to provision.sh (mirrors deploy/vm/destroy-vm.virt-manager.sh).
+# counterpart to provision.sh (mirrors deploy/vm/vmlab.sh destroy).
 #
 #   HCLOUD_TOKEN=… ./deploy/hetzner/destroy.sh          # prompts before deleting
 #   HCLOUD_TOKEN=… ./deploy/hetzner/destroy.sh --yes    # no prompt (scripts/CI)

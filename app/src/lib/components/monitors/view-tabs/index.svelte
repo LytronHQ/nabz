@@ -2,20 +2,30 @@
 	// Secondary nav for the Monitors section (#223): the three views of the same
 	// monitors — List, Map, Dependencies. Rendered at the top of each view page so
 	// they read as peers with a single home, instead of a nav item + a button.
-	import { page } from '$app/stores';
+	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
 
 	const tabs = [
-		{ href: resolve('/monitors'), label: 'List', match: (p: string) => p === '/monitors' },
-		{ href: resolve('/monitors/map'), label: 'Map', match: (p: string) => p === '/monitors/map' },
 		{
-			href: resolve('/monitors/dependencies'),
+			href: resolve('monitors'),
+			label: 'List',
+			match: (p: string) => p === '/monitors'
+		},
+
+		{
+			href: resolve('monitors/map'),
+			label: 'Map',
+			match: (p: string) => p === '/monitors/map'
+		},
+
+		{
+			href: resolve('monitors/dependencies'),
 			label: 'Dependencies',
 			match: (p: string) => p.startsWith('/monitors/dependencies')
 		}
 	];
 
-	let path = $derived($page.url.pathname);
+	let path = $derived(page.url.pathname);
 </script>
 
 <nav class="view-tabs" aria-label="Monitor views">

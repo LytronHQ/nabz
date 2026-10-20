@@ -4,9 +4,18 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import net from 'node:net';
 
-// Use non-default ports so the test never clashes with a running fixture.
-process.env.PORT = '8791';
-process.env.TCP_PORT = '9791';
+// Free ports from the OS. Fixed ones (8791/9791) hung the whole run when another
+// program on the machine already listened there: listen failed, start() never
+// resolved, and every test waited forever.
+async function freePort() {
+	const srv = net.createServer();
+	await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+	const { port } = srv.address();
+	await new Promise((r) => srv.close(r));
+	return String(port);
+}
+process.env.PORT = await freePort();
+process.env.TCP_PORT = await freePort();
 const { start, stop } = await import('./server.mjs');
 
 const BASE = `http://127.0.0.1:${process.env.PORT}`;
@@ -105,4 +114,113 @@ test('the TCP port is open (accepts a connection)', async () => {
 		sock.on('error', reject);
 		sock.setTimeout(2000, () => reject(new Error('tcp connect timed out')));
 	});
+});
+
+// A port check that resets the connection must not take the fixture down. The
+// TCP handler had no 'error' listener, so a client's RST became an unhandled
+// error event and killed the process — every later journey that needed the
+// fixture then failed with "lookup fixture … server misbehaving".
+test('a client resetting a TCP connection does not crash the fixture', async () => {
+	const port = Number(process.env.TCP_PORT);
+	for (let i = 0; i < 20; i++) {
+		await new Promise((resolve) => {
+			const s = net.connect(port, '127.0.0.1', () => s.resetAndDestroy());
+			s.on('error', () => {});
+			s.on('close', resolve);
+		});
+	}
+	await new Promise((r) => setTimeout(r, 200));
+	const banner = await new Promise((resolve, reject) => {
+		const s = net.connect(port, '127.0.0.1');
+		let buf = '';
+		s.on('data', (d) => (buf += d));
+		s.on('end', () => resolve(buf));
+		s.on('error', reject);
+	});
+	assert.equal(banner, 'fixture-tcp\n');
+	assert.equal((await fetch(`${BASE}/health`)).status, 200);
+});
+
+test('/push/:id keeps the raw body and push headers, answering 201 (#602)', async () => {
+	assert.equal((await fetch(`${BASE}/push/p1`)).status, 404);
+	// Bytes that are not valid UTF-8 must survive untouched.
+	const bytes = Buffer.from([0x00, 0xff, 0xfe, 0x80, 0x41]);
+	const post = await fetch(`${BASE}/push/p1`, {
+		method: 'POST',
+		body: bytes,
+		headers: { 'content-encoding': 'aes128gcm', ttl: '21600', urgency: 'high', topic: 'incident-x' }
+	});
+	assert.equal(post.status, 201);
+	const got = await (await fetch(`${BASE}/push/p1`)).json();
+	assert.deepEqual(Buffer.from(got.body, 'base64'), bytes);
+	assert.equal(got.headers['content-encoding'], 'aes128gcm');
+	assert.equal(got.headers.ttl, '21600');
+	assert.equal(got.headers.urgency, 'high');
+	assert.equal(got.headers.topic, 'incident-x');
+});
+
+test('/oauth/github: authorize, token and user return the identity set with /next', async () => {
+	const who = { id: 42, login: 'octo', name: 'Octo Cat', email: 'octo@e2e.local' };
+	assert.equal(
+		(await fetch(`${BASE}/oauth/github/next`, { method: 'POST', body: JSON.stringify(who) }))
+			.status,
+		200
+	);
+	const auth = await fetch(
+		`${BASE}/oauth/github/authorize?state=s1&redirect_uri=${encodeURIComponent('http://web.test/auth/callback')}`,
+		{ redirect: 'manual' }
+	);
+	assert.equal(auth.status, 302);
+	const back = new URL(auth.headers.get('location'));
+	assert.equal(back.origin + back.pathname, 'http://web.test/auth/callback');
+	assert.equal(back.searchParams.get('state'), 's1');
+	const code = back.searchParams.get('code');
+	assert.ok(code);
+
+	// Without a client secret the token request is refused, as GitHub does.
+	const noSecret = await fetch(`${BASE}/oauth/github/token`, {
+		method: 'POST',
+		body: new URLSearchParams({ code })
+	});
+	assert.equal((await noSecret.json()).error, 'incorrect_client_credentials');
+	const tok = await fetch(`${BASE}/oauth/github/token`, {
+		method: 'POST',
+		headers: { authorization: 'Basic ' + Buffer.from('id:secret').toString('base64') },
+		body: new URLSearchParams({ code })
+	});
+	const { access_token } = await tok.json();
+	const user = await (
+		await fetch(`${BASE}/oauth/github/user`, {
+			headers: { authorization: `Bearer ${access_token}` }
+		})
+	).json();
+	assert.deepEqual(user, {
+		id: 42,
+		login: 'octo',
+		name: 'Octo Cat',
+		email: 'octo@e2e.local',
+		avatar_url: ''
+	});
+
+	// A second authorize without a new /next is a cancel, like GitHub's Cancel button.
+	const again = await fetch(
+		`${BASE}/oauth/github/authorize?state=s2&redirect_uri=${encodeURIComponent('http://web.test/cb')}`,
+		{
+			redirect: 'manual'
+		}
+	);
+	assert.equal(new URL(again.headers.get('location')).searchParams.get('error'), 'access_denied');
+	assert.equal(
+		(await fetch(`${BASE}/oauth/github/user`, { headers: { authorization: 'Bearer nope' } }))
+			.status,
+		401
+	);
+});
+
+test('/canary answers until it is switched down, then drops the connection (#598)', async () => {
+	assert.equal((await fetch(`${BASE}/canary`)).status, 204);
+	assert.equal((await fetch(`${BASE}/canary/down`, { method: 'POST' })).status, 200);
+	await assert.rejects(fetch(`${BASE}/canary`));
+	assert.equal((await fetch(`${BASE}/canary/up`, { method: 'POST' })).status, 200);
+	assert.equal((await fetch(`${BASE}/canary`)).status, 204);
 });

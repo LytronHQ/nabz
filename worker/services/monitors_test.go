@@ -12,6 +12,7 @@ import (
 	"monitors/corelib/models"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"unicode/utf8"
 )
 
@@ -475,5 +476,32 @@ func TestSanitizeFinalURLDoesNotSplitARune(t *testing.T) {
 func TestSanitizeFinalURLNilIsEmpty(t *testing.T) {
 	if got := sanitizeFinalURL(nil); got != "" {
 		t.Fatalf("got %q, want empty", got)
+	}
+}
+
+// Every check must open its own connection. The checks shared a keep-alive pool,
+// so a check could go out on a connection the target's edge had just closed and
+// fail in a few milliseconds with no status code: about 0.5% of checks against
+// sites that answered 200 to every request that reached them (#595).
+func TestRunCheckOpensAFreshConnectionEachTime(t *testing.T) {
+	var opened atomic.Int32
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	srv.Config.ConnState = func(_ net.Conn, s http.ConnState) {
+		if s == http.StateNew {
+			opened.Add(1)
+		}
+	}
+	srv.Start()
+	defer srv.Close()
+
+	for i := 0; i < 3; i++ {
+		if r := RunCheck(models.Monitor{Type: "website", Target: srv.URL}); !r.Up {
+			t.Fatalf("check %d: expected up, got %+v", i+1, r)
+		}
+	}
+	if got := opened.Load(); got != 3 {
+		t.Fatalf("expected 3 connections for 3 checks, got %d", got)
 	}
 }

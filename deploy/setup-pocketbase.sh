@@ -50,7 +50,16 @@ set -a; . "$ENV_FILE"; set +a
 : "${PB_SUPERUSER_PASSWORD:?set PB_SUPERUSER_PASSWORD in $ENV_FILE}"
 
 if [ ! -f /etc/monitors/.hardened ]; then
-  bash "$APP_DIR/deploy/harden.sh" && touch /etc/monitors/.hardened
+  # This is the node that serves PocketBase, so it is the only one that opens
+  # 8090 — and only to the private network. The other roles pass nothing and get
+  # SSH only.
+  #
+  # A flag, not an environment variable: the vendored hardening takes flags,
+  # because a misspelt variable is ignored in silence while a misspelt flag stops
+  # the run.
+  harden_args=()
+  [ -n "${PRIVATE_SUBNET:-}" ] && harden_args+=(--allow "${PRIVATE_SUBNET}:8090")
+  bash "$APP_DIR/deploy/.ops/server.sh" harden "${harden_args[@]}" && touch /etc/monitors/.hardened
 fi
 
 # --- pb_data storage ---------------------------------------------------------
@@ -170,39 +179,40 @@ curl -fsS "http://${PB_ADDR}:${PB_PORT}/api/health" >/dev/null || {
 
 CID="$(docker compose -f deploy/pocketbase.yml ps -q pocketbase)"
 
-# --- one-time: put the database in incremental auto-vacuum mode (#322) --------
-# incremental_vacuum does nothing unless auto_vacuum is INCREMENTAL, and switching
-# modes requires a full VACUUM to rewrite the file. That rewrite takes an
-# exclusive lock and needs free disk equal to the database size, so it is free on
-# a fresh instance and a multi-minute write stall on a populated one.
-#
-# Hence the guard: this only ever runs while the file is still small. A database
-# that missed the window keeps working — maintenance.sh detects the mode and skips
-# the vacuum with an explanation rather than silently doing nothing.
-PB_CONVERT_MAX_BYTES="${PB_CONVERT_MAX_BYTES:-52428800}"   # 50 MiB
-av_mode="$(docker exec "$CID" sqlite3 /pb_data/data.db 'PRAGMA auto_vacuum;' 2>/dev/null || echo '')"
-if [ "$av_mode" = "2" ]; then
-  echo "· auto_vacuum already INCREMENTAL"
-elif [ -z "$av_mode" ]; then
-  echo "· skipping auto_vacuum conversion (could not read the mode — old image without sqlite?)"
-else
-  db_bytes="$(docker exec "$CID" sh -c 'wc -c < /pb_data/data.db' 2>/dev/null | tr -d ' ' || echo 0)"
-  if [ "${db_bytes:-0}" -le "$PB_CONVERT_MAX_BYTES" ]; then
-    echo "==> converting to auto_vacuum=INCREMENTAL (one-time full VACUUM, db is ${db_bytes}B)"
-    docker exec "$CID" sqlite3 -cmd '.timeout 30000' /pb_data/data.db \
-      'PRAGMA auto_vacuum = INCREMENTAL; VACUUM;' \
-      && echo "   converted (mode now $(docker exec "$CID" sqlite3 /pb_data/data.db 'PRAGMA auto_vacuum;'))" \
-      || echo "   WARN: conversion failed — maintenance.sh will skip the vacuum and say so"
-  else
-    echo "!! auto_vacuum is '$av_mode', not INCREMENTAL, and this database is ${db_bytes}B."
-    echo "   NOT converting: the full VACUUM that mode switch needs would lock the"
-    echo "   database for the whole rewrite. Do it in a maintenance window by hand."
-  fi
-fi
+# --- database steps, never alongside the running server (#520) ----------------
+# A second process that opens pb_data after a PocketBase backup deletes the WAL
+# the server is still using — that took production down on 2026-10-10. So the
+# superuser goes through the API, the vacuum mode comes from the file header,
+# and whatever does need the files (a fresh superuser, the one-time conversion)
+# runs with the server stopped. See deploy/pb-db-steps.sh.
+PB_BASE="http://${PB_ADDR}:${PB_PORT}"
+pb_exec() { docker exec "$CID" "$@"; }
+pb_stop() { docker compose -f deploy/pocketbase.yml stop pocketbase >/dev/null; }
+pb_start() {
+  docker compose -f deploy/pocketbase.yml start pocketbase >/dev/null
+  CID="$(docker compose -f deploy/pocketbase.yml ps -q pocketbase)"
+  local _
+  for _ in $(seq 1 60); do
+    curl -fsS "${PB_BASE}/api/health" >/dev/null 2>&1 && return 0
+    sleep 2
+  done
+  echo "PocketBase did not come back on ${PB_BASE} after a stop"; exit 1
+}
+pb_run_offline() { # entry args…
+  local entry="$1"; shift
+  # -T and </dev/null: this script arrives as `bash -s` on stdin, and a `run`
+  # that inherits stdin swallowed the rest of it; setup stopped silently and the
+  # deploy carried on against a half-set-up PocketBase (#586).
+  docker compose -f deploy/pocketbase.yml run -T --rm --no-deps --entrypoint "$entry" pocketbase "$@" </dev/null
+}
+# shellcheck source=pb-db-steps.sh
+. "$APP_DIR/deploy/pb-db-steps.sh"
 
-echo "==> ensuring superuser ($PB_SUPERUSER_EMAIL)"
-docker exec "$CID" /usr/local/bin/pocketbase superuser upsert "$PB_SUPERUSER_EMAIL" "$PB_SUPERUSER_PASSWORD" --dir /pb_data \
-  || docker exec "$CID" pocketbase superuser upsert "$PB_SUPERUSER_EMAIL" "$PB_SUPERUSER_PASSWORD" --dir /pb_data
+# One-time: incremental auto-vacuum (#322), only while the file is still small —
+# the conversion is a full rewrite.
+pb_ensure_incremental_vacuum "${PB_CONVERT_MAX_BYTES:-52428800}"   # 50 MiB
+
+pb_ensure_superuser || exit 1
 
 TOKEN="$(curl -fsS "http://${PB_ADDR}:${PB_PORT}/api/collections/_superusers/auth-with-password" \
   -H 'Content-Type: application/json' \
@@ -285,7 +295,10 @@ seed_sa "${SEED_EVALUATOR_USERNAME:-}" "${SEED_EVALUATOR_PASSWORD:-}" evaluator
 # auxiliary.db to ~953 MB against ~45 MB of real data — 21x — which would eat
 # the data volume and make its sizing meaningless. 4 = warn.
 echo "==> applying settings (app name/URL, request-log level, SMTP, R2 backups) via /api/settings"
-settings_body="$(jq -nc \
+# The SMTP password and the S3 secret reach jq through its environment and the
+# body reaches curl on stdin: never argv, which every user on the host can read
+# with ps. They were empty until #627 wired PocketBase's mail up.
+settings_body="$(SMTP_PASS="${PB_SMTP_PASSWORD:-}" S3_SECRET="${PB_BACKUP_S3_SECRET:-}" jq -nc \
   --arg logsMinLevel   "${PB_LOGS_MIN_LEVEL:-4}" \
   --arg appName        "${PB_APP_NAME:-nabz}" \
   --arg appURL         "${PB_APP_URL:-}" \
@@ -294,13 +307,11 @@ settings_body="$(jq -nc \
   --arg smtpHost       "${PB_SMTP_HOST:-}" \
   --arg smtpPort       "${PB_SMTP_PORT:-587}" \
   --arg smtpUser       "${PB_SMTP_USERNAME:-}" \
-  --arg smtpPass       "${PB_SMTP_PASSWORD:-}" \
   --arg smtpTLS        "${PB_SMTP_TLS:-false}" \
   --arg s3Endpoint     "${PB_BACKUP_S3_ENDPOINT:-}" \
   --arg s3Bucket       "${PB_BACKUP_S3_BUCKET:-}" \
   --arg s3Region       "${PB_BACKUP_S3_REGION:-auto}" \
   --arg s3Key          "${PB_BACKUP_S3_ACCESS_KEY:-}" \
-  --arg s3Secret       "${PB_BACKUP_S3_SECRET:-}" \
   --arg backupCron     "${PB_BACKUP_CRON:-}" \
   --arg backupKeep     "${PB_BACKUP_MAX_KEEP:-0}" '
   { meta: ({ appName: $appName, senderName: $senderName }
@@ -309,7 +320,7 @@ settings_body="$(jq -nc \
     logs: { minLevel: ($logsMinLevel | tonumber) } }
   + (if $smtpHost == "" then {} else
       { smtp: { enabled: true, host: $smtpHost, port: ($smtpPort | tonumber),
-                username: $smtpUser, password: $smtpPass, authMethod: "PLAIN",
+                username: $smtpUser, password: $ENV.SMTP_PASS, authMethod: "PLAIN",
                 tls: ($smtpTLS == "true") } } end)
   # PB own cron defaults to OFF (#322): the maintenance timer drives backups so
   # they run AFTER the checkpoint and vacuum, and so cronMaxKeep does not become a
@@ -317,11 +328,11 @@ settings_body="$(jq -nc \
   + (if ($s3Endpoint == "" or $s3Bucket == "") then {} else
       { backups: { cron: $backupCron, cronMaxKeep: ($backupKeep | tonumber),
                    s3: { enabled: true, bucket: $s3Bucket, region: $s3Region,
-                         endpoint: $s3Endpoint, accessKey: $s3Key, secret: $s3Secret,
+                         endpoint: $s3Endpoint, accessKey: $s3Key, secret: $ENV.S3_SECRET,
                          forcePathStyle: true } } } end)')"
 code="$(curl -sS -o /tmp/pb_settings.json -w '%{http_code}' \
   "http://${PB_ADDR}:${PB_PORT}/api/settings" -X PATCH \
-  -H "Authorization: $TOKEN" -H 'Content-Type: application/json' --data-binary "$settings_body")"
+  -H "Authorization: $TOKEN" -H 'Content-Type: application/json' --data-binary @- <<<"$settings_body")"
 case "$code" in
   200) echo "   settings applied (app name/URL, logs.minLevel=${PB_LOGS_MIN_LEVEL:-4}$([ -n "${PB_SMTP_HOST:-}" ] && echo ', SMTP')$([ -n "${PB_BACKUP_S3_ENDPOINT:-}" ] && echo ', R2 backups'))";;
   *)   echo "   WARN: /api/settings PATCH got HTTP $code: $(cat /tmp/pb_settings.json)";;
@@ -331,19 +342,38 @@ esac
 # Labels and ordering for zone codes. Seeded here rather than in the schema
 # import because the import is additive over collections, not rows.
 #
-# ONLY eu-central. us-east is deliberately NOT seeded: the ash worker was dropped
+# eu-central and ap-southeast — the zones FLEET has a worker for (the Singapore
+# one since #498). us-east is deliberately NOT seeded: the ash worker was dropped
 # from FLEET (cx23 is EU-only), so a us-east row would put a zone in the monitor
 # picker that no worker will ever report for — the exact dead-zone failure #328
 # fixed. A zone row goes in when a worker for it does.
 #
 # `code` is the queue key and is stamped into every checks row, so it is created
-# once and never edited here; display_name is the part that is safe to change.
+# once and never edited here. The labels — display_name and group_name — are
+# owned by this list: an existing row whose labels differ is updated to match, so
+# renaming a zone is a change here plus a deploy, never a hand edit to the
+# production database (#516). Before, an existing row was skipped outright and a
+# rename never reached it.
 echo "==> seeding zones"
 seed_zone() { # code group_code group_name display_name sort_order
-  existing="$(curl -fsS "http://${PB_ADDR}:${PB_PORT}/api/collections/zones/records?perPage=1&skipTotal=true&filter=$(jq -rn --arg c "$1" '@uri "code=\"\($c)\""')" \
-    -H "Authorization: $TOKEN" 2>/dev/null | jq -r '.items[0].id // empty')"
+  local row existing
+  row="$(curl -fsS "http://${PB_ADDR}:${PB_PORT}/api/collections/zones/records?perPage=1&skipTotal=true&filter=$(jq -rn --arg c "$1" '@uri "code=\"\($c)\""')" \
+    -H "Authorization: $TOKEN" 2>/dev/null | jq -c '.items[0] // empty')"
+  existing=""
+  [ -z "$row" ] || existing="$(jq -r '.id // empty' <<<"$row")"
   if [ -n "$existing" ]; then
-    echo "   $1 already present"
+    if [ "$(jq -r '.display_name' <<<"$row")" = "$4" ] && [ "$(jq -r '.group_name' <<<"$row")" = "$3" ]; then
+      echo "   $1 already present"
+      return
+    fi
+    code="$(curl -sS -o /tmp/pb_zone.json -w '%{http_code}' \
+      "http://${PB_ADDR}:${PB_PORT}/api/collections/zones/records/${existing}" -X PATCH \
+      -H "Authorization: $TOKEN" -H 'Content-Type: application/json' \
+      -d "$(jq -nc --arg gn "$3" --arg dn "$4" '{group_name:$gn, display_name:$dn}')")"
+    case "$code" in
+      200) echo "   relabelled $1 ($4)";;
+      *)   echo "   WARN: relabelling zone $1 got HTTP $code: $(cat /tmp/pb_zone.json)";;
+    esac
     return
   fi
   body="$(jq -nc --arg c "$1" --arg gc "$2" --arg gn "$3" --arg dn "$4" --argjson so "$5" \
@@ -356,7 +386,8 @@ seed_zone() { # code group_code group_name display_name sort_order
     *)   echo "   WARN: seeding zone $1 got HTTP $code: $(cat /tmp/pb_zone.json)";;
   esac
 }
-seed_zone eu-central eu Europe "EU" 10
+seed_zone eu-central eu Europe "Europe" 10
+seed_zone ap-southeast ap Asia "Asia" 20
 
 # users.listRule so the web service account can count users for /admin/usage
 # (#246). The built-in users collection isn't in pb_schema.json, so the schema
@@ -437,12 +468,92 @@ echo "==> seeding default app users"
 seed_app_user "${SEED_ADMIN_EMAIL:-admin@nabz.sh}" "${SEED_PASSWORD:-demo1234}" "admin user"
 seed_app_user "${SEED_USER_EMAIL:-user@nabz.sh}"   "${SEED_PASSWORD:-demo1234}" "regular user"
 
+# Account emails (#627): verification, password reset and email change link to
+# the web's own pages, not PocketBase's admin UI.
+echo "==> users mail templates"
+# shellcheck source=pb-mail.sh
+. "$APP_DIR/deploy/pb-mail.sh"
+pb_apply_users_mail "http://${PB_ADDR}:${PB_PORT}" "$TOKEN"
+
+# Sign in with GitHub / Google (#609). The provider keys come from Bitwarden via
+# pocketbase.env; with none set this turns OAuth off, which is the default.
+#
+# LAST of everything that touches the users collection, and it must stay last.
+# PocketBase < 0.36.8 blanks the OAuth client secrets in its in-memory copy of a
+# collection whenever it serialises it, so any superuser GET of
+# /api/collections/users after this PATCH (the must_change_password step above
+# does one) leaves sign-in sending no client_secret until the next write or
+# restart. That is how GitHub and Google sign-in failed in production on
+# 2026-10-19 ("client_secret is missing") while the database held the right
+# values. Upstream fix: "Fixed OAuth2 client secret reset when serializing a
+# cached collection model" (v0.36.8); production runs 0.40.5 since #620, so the
+# order no longer matters there. It stays last anyway: it costs nothing, and it
+# keeps an environment pinned to an older PocketBase safe.
+echo "==> users.oauth2 (sign in with GitHub / Google)"
+# shellcheck source=pb-oauth.sh
+. "$APP_DIR/deploy/pb-oauth.sh"
+pb_apply_oauth2 "http://${PB_ADDR}:${PB_PORT}" "$TOKEN"
+
 # --- maintenance timer (#322) -------------------------------------------------
 # systemd rather than cron: it gives a persistent timer that catches up after the
 # host was off, a journal to read afterwards, and a failure state an operator can
 # query — none of which a crontab line has.
 echo "==> installing the maintenance timer"
-install -m 755 "$APP_DIR/deploy/pocketbase/maintenance.sh" /usr/local/bin/nabz-pb-maintenance
+install -m 755 "$APP_DIR/deploy/.ops/db.sh" /usr/local/bin/nabz-pb-maintenance
+
+# The heartbeat is a FILE to the module, not a value: a URL on a command line is
+# readable by every user on the host through ps, and this one is a credential —
+# anyone who has it can keep the dead-man's switch quiet. remote-deploy.sh writes
+# PB_MAINTENANCE_PING_URL into the env file; this materialises it next to it.
+HB_FILE=/etc/monitors/pb-heartbeat.url
+hb_arg=""
+if [ -n "${PB_MAINTENANCE_PING_URL:-}" ]; then
+  ( umask 077; printf '%s\n' "$PB_MAINTENANCE_PING_URL" > "$HB_FILE" )
+  chmod 600 "$HB_FILE"
+  hb_arg="--heartbeat-url-file $HB_FILE"
+  echo "   maintenance heartbeat configured"
+else
+  # A stale file would keep pinging after the heartbeat was removed, which is
+  # worse than no heartbeat: the monitor stays green over a host doing nothing.
+  rm -f "$HB_FILE"
+  echo "   no maintenance heartbeat (PB_MAINTENANCE_PING_URL unset) — failures will be silent"
+fi
+
+# The container is RESOLVED, not guessed. Compose names it <project>-<service>-<n>
+# — monitors-pocketbase-pocketbase-1 — because nothing sets container_name, so the
+# plain "pocketbase" that the previous script defaulted to never matched anything.
+# Every maintenance run since this timer was installed died on
+# "container 'pocketbase' is not running", which means it has never taken a single
+# backup. Found by running the unit on a real deployed node; it cannot be seen any
+# other way, because the failure is in the journal of a host nobody reads.
+PB_CONTAINER_RESOLVED="$(docker inspect -f '{{.Name}}' "$CID" 2>/dev/null | sed 's|^/||')"
+[ -n "$PB_CONTAINER_RESOLVED" ] || {
+  echo "   ERROR: could not resolve the PocketBase container's name — the maintenance" >&2
+  echo "   timer would be installed pointing at nothing, which is how backups stop" >&2
+  echo "   silently. Refusing to install it." >&2
+  exit 1
+}
+echo "   maintenance target: $PB_CONTAINER_RESOLVED"
+
+# The address the job logs in at must be the one PocketBase is PUBLISHED on —
+# PB_ADDR, like every other call in this script. The unit used to say
+# 127.0.0.1, which a fleet node never binds (PB_BIND_IP is the private address),
+# so every nightly run failed its superuser login and took no backup (#512).
+# Dev binds 0.0.0.0, which is why localhost worked there and nowhere else.
+PB_MAINT_URL="http://${PB_ADDR}:${PB_PORT:-8090}"
+curl -fsS --max-time 10 "${PB_MAINT_URL}/api/health" >/dev/null 2>&1 || {
+  echo "   ERROR: PocketBase does not answer at ${PB_MAINT_URL}, the address the" >&2
+  echo "   maintenance job would log in at. Refusing to install a timer that cannot" >&2
+  echo "   take a backup." >&2
+  exit 1
+}
+
+# --backup-prefix nabz keeps the names backups have always had: the module builds
+# <prefix>-%Y%m%d-%H%M%S.zip, the same format as before.
+#
+# --credentials-file rather than the environment: the module reads it as DATA.
+# The script this replaced sourced the same file, which made every value in it
+# shell code, and passed the password in curl's argv.
 cat > /etc/systemd/system/nabz-pb-maintenance.service <<UNIT
 [Unit]
 Description=nabz PocketBase maintenance (checkpoint, bounded vacuum, backup)
@@ -451,9 +562,10 @@ Requires=docker.service
 
 [Service]
 Type=oneshot
-EnvironmentFile=-${ENV_FILE}
 WorkingDirectory=${APP_DIR}
-ExecStart=/usr/local/bin/nabz-pb-maintenance
+ExecStart=/usr/local/bin/nabz-pb-maintenance maintain \
+  --app pocketbase --url ${PB_MAINT_URL} \
+  --credentials-file ${ENV_FILE} --backup-prefix nabz ${hb_arg}
 UNIT
 cat > /etc/systemd/system/nabz-pb-maintenance.timer <<UNIT
 [Unit]

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { formatDuration } from '$lib/utils/format-utils';
+	import { formatDuration } from '#lib/utils/format-utils.js';
 
 	type Interval = { s: number; e: number };
 	type Range = {
@@ -71,7 +71,11 @@
 		<span class="t">Availability</span>
 		<div class="seg">
 			{#each ranges as r, i (i)}
-				<button class:on={selected === r.key} onclick={() => (selected = r.key)}>{r.label}</button>
+				<button
+					class:on={selected === r.key}
+					aria-pressed={selected === r.key}
+					onclick={() => (selected = r.key)}>{r.label}</button
+				>
 			{/each}
 		</div>
 	</div>

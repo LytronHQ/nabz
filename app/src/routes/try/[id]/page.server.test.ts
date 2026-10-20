@@ -1,7 +1,7 @@
 import { test, expect, vi, beforeEach } from 'vitest';
 
-vi.mock('$lib/server/service-pb', () => ({ serviceClient: vi.fn() }));
-const { serviceClient } = await import('$lib/server/service-pb');
+vi.mock('#lib/server/service-pb.js', () => ({ serviceClient: vi.fn() }));
+const { serviceClient } = await import('#lib/server/service-pb.js');
 const { load } = await import('./+page.server');
 
 function fakePb(row: unknown, notFound = false) {

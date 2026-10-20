@@ -1,12 +1,18 @@
+import type { ClientResponseError } from 'pocketbase';
 import { type Actions, redirect } from '@sveltejs/kit';
 import { z } from 'zod';
 import type { PageServerLoad } from './$types';
-import { getActionFailure, getAuthCallbackData, getFormRecord } from '$lib/utils/action-utils';
-import { migrateAnonMonitors } from '$lib/server/anon-migrate';
-import { clearAnonCookie } from '$lib/server/anon';
+import { getActionFailure, getAuthCallbackData, getFormRecord } from '#lib/utils/action-utils.js';
+import { migrateAnonMonitors } from '#lib/server/anon-migrate.js';
+import { clearAnonCookie } from '#lib/server/anon.js';
 
 export const load: PageServerLoad = async ({ locals, url }) => {
-	return await getAuthCallbackData(locals, url);
+	// Already signed in: the form would read as if you were signed out.
+	if (locals.user) throw redirect(303, '/dashboard');
+	// Set by /auth/callback when a GitHub or Google sign-in did not complete (#609).
+	const reason = url.searchParams.get('oauth');
+	const oauth = reason === 'cancelled' || reason === 'failed' ? reason : null;
+	return { ...(await getAuthCallbackData(locals)), oauth };
 };
 
 const signinSchema = z.object({
@@ -24,14 +30,14 @@ export const actions = {
 		const { email, password } = formData;
 		try {
 			await locals.pb?.collection('users').authWithPassword(email, password);
-		} catch (err: any) {
-			switch (err.status) {
+		} catch (err) {
+			switch ((err as ClientResponseError).status) {
 				case 400:
 					return getActionFailure(err, 'Invalid username or password');
 				case 403:
 					return getActionFailure(
 						err,
-						err.response.message ?? 'Failed to login, please try again.'
+						(err as ClientResponseError).response.message ?? 'Failed to login, please try again.'
 					);
 				default:
 					return getActionFailure(

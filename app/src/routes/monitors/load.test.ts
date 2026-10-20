@@ -1,6 +1,11 @@
 import { test, expect } from 'vitest';
 import { load } from './+page.server';
 
+// The fakes stub only what load touches, so the event is a deliberate partial.
+type LoadEvent = Parameters<typeof load>[0];
+type LoadData = Exclude<Awaited<ReturnType<typeof load>>, void>;
+const run = async (event: object) => (await load(event as LoadEvent)) as LoadData;
+
 const fakeList = {
 	items: [
 		{ id: 'm1', name: 'Alpha' },
@@ -12,7 +17,7 @@ const fakeList = {
 	totalPages: 1
 };
 
-function fakeLocals(user: any) {
+function fakeLocals(user: { id: string } | null) {
 	return {
 		user,
 		pb: {
@@ -23,7 +28,7 @@ function fakeLocals(user: any) {
 }
 
 test('load server-renders the first page of monitors for an authed user', async () => {
-	const res: any = await load({ locals: fakeLocals({ id: 'u1' }) } as any);
+	const res = await run({ locals: fakeLocals({ id: 'u1' }) });
 	expect(res.monitors.items).toHaveLength(2);
 	expect(res.monitors.items[0].name).toBe('Alpha');
 	// Uptime is intentionally not computed server-side (the N+1) — raw records only.
@@ -31,7 +36,7 @@ test('load server-renders the first page of monitors for an authed user', async 
 });
 
 test('load redirects to /signin when not authenticated', async () => {
-	await expect(load({ locals: fakeLocals(null) } as any)).rejects.toMatchObject({
+	await expect(run({ locals: fakeLocals(null) })).rejects.toMatchObject({
 		status: 303,
 		location: '/signin'
 	});

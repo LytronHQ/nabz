@@ -25,6 +25,14 @@ jobs:
     with: { environment: "${{ inputs.environment }}" }
     secrets: inherit
 
+  # Web Push signing keys (#602). Mint-if-missing; a failure here costs only
+  # push alerts (the evaluator skips them), so nothing downstream waits on it.
+  vapid:
+    needs: credentials
+    uses: ./.github/workflows/bootstrap-vapid.yml
+    with: { environment: "${{ inputs.environment }}" }
+    secrets: inherit
+
   hetzner:
     needs: credentials
     uses: ./.github/workflows/infra-hetzner.yml
@@ -54,9 +62,16 @@ jobs:
   # later redeploy would quietly fix it.
   watch:
     needs: access
-    # Opt-out, not opt-in: an environment is watched unless it says otherwise, so
-    # forgetting to set the variable leaves you monitored rather than blind.
-    if: ${{ inputs.deploy && vars.EXTERNAL_WATCH != 'off' }}
+    # No EXTERNAL_WATCH test here, deliberately. A job that `uses:` a reusable
+    # workflow cannot declare `environment:`, so `vars.*` in its `if:` resolves
+    # against REPOSITORY variables — where EXTERNAL_WATCH does not exist. The test
+    # that used to live here therefore compared '' against 'off' and passed every
+    # time: staging sets EXTERNAL_WATCH=off and was called anyway, on every run.
+    #
+    # external-watch.sh does the check itself, from the materialized environment
+    # where the value is actually visible, and prints why it stopped. That is the
+    # one mechanism now, rather than two with only one of them working.
+    if: ${{ inputs.deploy }}
     uses: ./.github/workflows/infra-watch.yml
     with: { environment: "${{ inputs.environment }}" }
     secrets: inherit
@@ -65,11 +80,11 @@ jobs:
   # the web deploy's Access check.
   #
   # The result check is required, not decoration: a skipped `needs` job skips its
-  # dependents by default, and watch IS skipped whenever EXTERNAL_WATCH=off — which
-  # staging sets. Without this the reordering above would have stopped staging
-  # deploying at all.
+  # dependents by default. watch is skipped whenever deploy=false, and was
+  # previously skipped for EXTERNAL_WATCH=off too. Keeping the tolerance costs
+  # nothing and stops a future guard on `watch` from silently killing the deploy.
   nodes:
-    needs: [access, watch]
+    needs: [access, watch, vapid]
     if: ${{ inputs.deploy && !cancelled() && (needs.watch.result == 'success' || needs.watch.result == 'skipped') }}
     uses: ./.github/workflows/deploy-nodes.yml
     with: { environment: "${{ inputs.environment }}" }

@@ -1,11 +1,12 @@
+import type { ClientResponseError } from 'pocketbase';
 import { type Actions, redirect } from '@sveltejs/kit';
 import { jwtDecode } from 'jwt-decode';
 import { z } from 'zod';
 import type { PageServerLoad } from './$types';
-import { getActionFailure, getFormRecord } from '$lib/utils/action-utils';
+import { getActionFailure, getFormRecord } from '#lib/utils/action-utils.js';
 
 type OutputType = {
-	email: string;
+	email: string | null;
 };
 
 const resetPasswordSchema = z.object({
@@ -13,8 +14,16 @@ const resetPasswordSchema = z.object({
 	confirmPassword: z.string()
 });
 
+// A mangled or truncated link (mail clients wrap long URLs) used to throw out of
+// jwtDecode and answer 500 Internal Error. Decoding is only for showing the
+// address; PocketBase still validates the token on submit.
 export const load: PageServerLoad<OutputType> = async ({ params }) => {
-	return jwtDecode(params.token) as OutputType;
+	try {
+		const { email } = jwtDecode<{ email?: unknown }>(params.token);
+		return { email: typeof email === 'string' && email ? email : null };
+	} catch {
+		return { email: null };
+	}
 };
 
 export const actions = {
@@ -28,8 +37,8 @@ export const actions = {
 		const { password, confirmPassword } = formData;
 		try {
 			await locals.pb?.collection('users').confirmPasswordReset(token, password, confirmPassword);
-		} catch (err: any) {
-			switch (err.status) {
+		} catch (err) {
+			switch ((err as ClientResponseError).status) {
 				case 400:
 					return getActionFailure(err, 'Failed to reset password, please try again.');
 				case 403:

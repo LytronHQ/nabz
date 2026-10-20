@@ -1,4 +1,4 @@
-import type { EntityIdType } from '$lib/constants';
+import type { EntityIdType } from '#lib/constants.js';
 import { fail } from '@sveltejs/kit';
 
 export function failIfNoUser(locals: App.Locals) {
@@ -15,7 +15,7 @@ export function failIfNoId(id: EntityIdType): string {
 	return id;
 }
 
-export function failIfNoResponse(response: any | undefined): any {
+export function failIfNoResponse<T>(response: T): NonNullable<T> {
 	if (!response) {
 		throw fail(404);
 	}

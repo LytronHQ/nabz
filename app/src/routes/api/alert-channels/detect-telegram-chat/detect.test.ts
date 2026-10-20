@@ -1,11 +1,14 @@
 import { test, expect, vi, afterEach } from 'vitest';
 import { POST } from './+server';
 
-function ev(body: any, user: any = { id: 'u1' }) {
-	return { locals: { user }, request: { json: async () => body } } as any;
+// A partial RequestEvent: the handler only reads locals.user and request.json().
+function ev(body: unknown, user: { id: string } | null = { id: 'u1' }) {
+	return { locals: { user }, request: { json: async () => body } } as unknown as Parameters<
+		typeof POST
+	>[0];
 }
-function tg(ok: boolean, payload: any, status = 200) {
-	return { ok, status, json: async () => payload } as any;
+function tg(ok: boolean, payload: unknown, status = 200) {
+	return { ok, status, json: async () => payload };
 }
 afterEach(() => {
 	vi.unstubAllGlobals();

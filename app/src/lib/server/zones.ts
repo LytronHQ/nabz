@@ -1,4 +1,5 @@
 import type PocketBase from 'pocketbase';
+import type { ZoneLabel } from '#lib/utils/zone-order.js';
 
 /** A zone's presentation, from the `zones` collection (#311).
  *
@@ -64,4 +65,12 @@ export function labelZones(codes: string[], zones: Map<string, Zone>): Zone[] {
 	return codes
 		.map((c) => zones.get(c) ?? fallbackZone(c))
 		.sort((a, b) => a.sortOrder - b.sortOrder || a.code.localeCompare(b.code));
+}
+
+/** The labels as the pages that show zone names need them (#558, #560). */
+export async function getZoneLabels(pb: PocketBase): Promise<Record<string, ZoneLabel>> {
+	const zones = await getZones(pb);
+	return Object.fromEntries(
+		[...zones].map(([code, z]) => [code, { label: z.displayName, sortOrder: z.sortOrder }])
+	);
 }

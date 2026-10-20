@@ -32,11 +32,37 @@ async function createMonitor(
 	const res = await api.post(`${PB}/api/collections/monitors/records`, {
 		headers: { Authorization: token },
 		// Short interval so the worker re-checks quickly once it's seeded.
-		data: { user: userId, name, type: 'website', target, interval: 30, enabled: true, status: 'pending' }
+		data: {
+			user: userId,
+			name,
+			type: 'website',
+			target,
+			interval: 30,
+			enabled: true,
+			status: 'pending'
+		}
 	});
 	expect(res.ok(), `create monitor failed: ${res.status()} ${await res.text()}`).toBeTruthy();
-	return (await res.json()).id as string;
+	const id = (await res.json()).id as string;
+	created.push(id);
+	return id;
 }
+
+// Every run used to leave its "e2e up" / "e2e down" monitors behind, so a local
+// stack collected one ongoing "e2e down" incident per run. Deleting the monitor
+// cascades to its checks, rollups and incidents.
+const created: string[] = [];
+test.afterAll(async ({ playwright }) => {
+	const api = await playwright.request.newContext();
+	const { token } = await auth(api);
+	for (const id of created) {
+		const r = await api.delete(`${PB}/api/collections/monitors/records/${id}`, {
+			headers: { Authorization: token }
+		});
+		expect([204, 404], `delete monitor ${id}`).toContain(r.status());
+	}
+	await api.dispose();
+});
 
 async function status(api: APIRequestContext, token: string, id: string) {
 	const r = await api.get(`${PB}/api/collections/monitors/records/${id}`, {
@@ -45,7 +71,9 @@ async function status(api: APIRequestContext, token: string, id: string) {
 	return (await r.json()).status as string;
 }
 
-test('a healthy target goes UP through the real worker → evaluator pipeline', async ({ request }) => {
+test('a healthy target goes UP through the real worker → evaluator pipeline', async ({
+	request
+}) => {
 	const { token, userId } = await auth(request);
 	const id = await createMonitor(request, token, userId, 'e2e up', `${FIXTURE}/status/200`);
 

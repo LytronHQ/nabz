@@ -1,8 +1,8 @@
 <script lang="ts">
-	import LegalPage from '$lib/components/legal/legal-page.svelte';
+	import LegalPage from '#lib/components/legal/legal-page.svelte';
 </script>
 
-<LegalPage title="Terms of Service" lastUpdated="2026-08-15">
+<LegalPage title="Terms of Service" lastUpdated="2026-10-11">
 	<h2>Acceptance</h2>
 	<p>
 		By creating an account or using nabz (the "Service") at <a href="https://nabz.sh">nabz.sh</a>,

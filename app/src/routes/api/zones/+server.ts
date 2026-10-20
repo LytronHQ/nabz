@@ -1,7 +1,7 @@
-import { json, type RequestHandler } from '@sveltejs/kit';
-import { failIfNoUser } from '$lib/utils/api-utils';
-import { getApiErrors } from '$lib/utils/action-utils';
-import { EVALUATOR_ZONE, WEB_ZONE } from '$lib/server/health';
+import type { RequestHandler } from '@sveltejs/kit';
+import { failIfNoUser } from '#lib/utils/api-utils.js';
+import { getApiErrors } from '#lib/utils/action-utils.js';
+import { EVALUATOR_ZONE, WEB_ZONE } from '#lib/server/health.js';
 
 // Distinct zone names that have reported stats, so the UI can offer them when
 // assigning a monitor to zones. An empty selection means "all zones".
@@ -18,8 +18,8 @@ export const GET: RequestHandler = async ({ locals }) => {
 					.filter((z) => z && z !== EVALUATOR_ZONE && z !== WEB_ZONE)
 			)
 		];
-		return json({ zones });
+		return Response.json({ zones });
 	} catch (err) {
-		return json(getApiErrors(err, 'Error getting zones'), { status: 500 });
+		return Response.json(getApiErrors(err, 'Error getting zones'), { status: 500 });
 	}
 };

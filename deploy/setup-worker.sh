@@ -52,7 +52,7 @@ fi
 
 # One-time host hardening (ufw / auto-updates / fail2ban / key-only SSH).
 if [ ! -f /etc/monitors/.hardened ]; then
-  bash "$APP_DIR/deploy/harden.sh" && touch /etc/monitors/.hardened
+  bash "$APP_DIR/deploy/.ops/server.sh" harden && touch /etc/monitors/.hardened
 fi
 
 # The private NIC has to be up before anything tries to reach PocketBase over it
@@ -69,25 +69,50 @@ fi
 echo "==> docker compose up"
 cd "$APP_DIR"
 
-# The Valkey sidecar now lives behind a profile so a multi-VM zone can turn it off
-# (#311). Start it only when this node is NOT pointed at a shared Valkey —
-# otherwise the node would run a second, private due-set for the zone, which means
-# two seed leaders and every monitor probed twice.
-CACHE_HOST_EFFECTIVE="$(grep -E '^CACHE_HOST=' "$ENV_FILE" 2>/dev/null | tail -1 | cut -d= -f2- || true)"
-PROFILE=()
-case "${CACHE_HOST_EFFECTIVE:-valkey}" in
-  valkey|"") PROFILE=(--profile local-cache); echo "   local Valkey sidecar: on" ;;
-  *) echo "   shared Valkey at ${CACHE_HOST_EFFECTIVE}: sidecar off" ;;
-esac
-
-# Replicas of the worker on this node. They share the node's Valkey and elect one
-# seeder between them, so this needs no other configuration.
-# Absent on any node whose env file predates this setting, which is the common
-# case — `|| true` because "not set" means "one replica", not "fail the deploy".
+# Workers on this node. A zone may hold any number of them, here and on other
+# hosts: each one heartbeats into worker_heartbeats, reads the zone's roster and
+# checks only its own shard of the monitors, so adding one adds capacity instead
+# of duplicating probes.
+#
 REPLICAS="$(grep -E '^WORKER_REPLICAS=' "$ENV_FILE" 2>/dev/null | tail -1 | cut -d= -f2- || true)"
 REPLICAS="${REPLICAS:-1}"
-docker compose --env-file "$ENV_FILE" -f deploy/worker.yml "${PROFILE[@]}" \
-  up -d --build --scale "worker=${REPLICAS}"
+case "$REPLICAS" in ''|*[!0-9]*) REPLICAS=1 ;; esac
+[ "$REPLICAS" -ge 1 ] || REPLICAS=1
+[ "$REPLICAS" -le 4 ] || { echo "error: WORKER_REPLICAS=$REPLICAS, but deploy/worker.yml declares 4." >&2
+                           echo "  Add a worker-5 service there, or spread the load over more nodes." >&2; exit 1; }
+
+# A stable WORKER_ID is what makes a redeploy invisible to the rest of the zone:
+# the restarted worker updates the row it already had, the row goes stale for the
+# seconds the container is down, and the TTL covers it. Without one, each replica
+# falls back to its container id — new on every recreate — and the zone sees the
+# dead ids alongside the live ones until the old rows age out, with the monitors
+# hashing to a dead index checked by nobody in the meantime.
+FIXED_ID="$(grep -E '^WORKER_ID=' "$ENV_FILE" 2>/dev/null | tail -1 | cut -d= -f2- || true)"
+if [ "$REPLICAS" -gt 1 ] && [ -z "$FIXED_ID" ]; then
+  echo "error: WORKER_REPLICAS=$REPLICAS with no WORKER_ID in $ENV_FILE." >&2
+  echo "  Every replica would take its container id as its worker id, and those" >&2
+  echo "  change on each deploy — the zone would spend a roster TTL believing the" >&2
+  echo "  dead workers are still there, leaving part of itself unchecked." >&2
+  echo "  remote-deploy.sh sets WORKER_ID; set it yourself if deploying by hand." >&2
+  exit 1
+fi
+
+# One profile per extra replica; the base `worker` service is always on.
+PROFILES=()
+i=2
+while [ "$i" -le "$REPLICAS" ]; do PROFILES+=(--profile "replica$i"); i=$((i + 1)); done
+
+# NO_START=1 (replace-worker, #418): build and create, do not start. The old host
+# in this zone is still checking; starting here too would put two workers in the
+# zone, each owning half of it, until replace-worker has drained the old one.
+if [ "${NO_START:-0}" = "1" ]; then
+  docker compose --env-file "$ENV_FILE" -f deploy/worker.yml "${PROFILES[@]}" \
+    up --no-start --build --remove-orphans
+  echo "   worker replicas: $REPLICAS — created, NOT started (NO_START=1)"
+  exit 0
+fi
+docker compose --env-file "$ENV_FILE" -f deploy/worker.yml "${PROFILES[@]}" \
+  up -d --build --remove-orphans
 echo "   worker replicas: $REPLICAS"
 
 echo; echo "Up. Logs:  docker compose -f $APP_DIR/deploy/worker.yml logs -f"

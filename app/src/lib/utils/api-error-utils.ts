@@ -1,4 +1,4 @@
-import type ApiError from '$lib/models/api-error';
+import type ApiError from '#lib/models/api-error.js';
 
 /**
  * A 400 carries per-field validation errors we can show inline on the form.

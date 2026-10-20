@@ -1,8 +1,11 @@
 import type PocketBase from 'pocketbase';
-import { getZones, fallbackZone } from '$lib/server/zones';
-import { MonitorStatuses } from '$lib/models/monitor';
-import { EVALUATOR_ZONE, WEB_ZONE } from '$lib/server/health';
-import { isStale } from '$lib/utils/format-utils';
+import { COUNTED_CHECKS } from '#lib/server/checks.js';
+import type { RecordModel } from 'pocketbase';
+import { getZones, getZoneLabels, fallbackZone } from '#lib/server/zones.js';
+import { nameZonesInText } from '#lib/utils/zone-order.js';
+import { MonitorStatuses } from '#lib/models/monitor.js';
+import { EVALUATOR_ZONE, WEB_ZONE } from '#lib/server/health.js';
+import { isStale } from '#lib/utils/format-utils.js';
 
 function pbDate(d: Date): string {
 	return d.toISOString().replace('T', ' ');
@@ -55,7 +58,8 @@ export async function getMonitorsOverview(
 
 	// Disabled monitors aren't scheduled, so their stored status is stale — treat
 	// them as "paused" (matches MonitorItem's derivation on the client).
-	const effStatus = (m: any) => (m.enabled === false ? 'paused' : (m.status ?? 'pending'));
+	const effStatus = (m: RecordModel): string =>
+		m.enabled === false ? 'paused' : (m.status ?? 'pending');
 
 	const counts: StatusCounts = { total: mons.length } as StatusCounts;
 	for (const s of MonitorStatuses) counts[s] = 0;
@@ -68,7 +72,7 @@ export async function getMonitorsOverview(
 		sort: '-checked_at',
 		fields: 'monitor,up,response_ms,checked_at'
 	});
-	const byMon = new Map<string, any[]>();
+	const byMon = new Map<string, RecordModel[]>();
 	for (const c of checks.items) {
 		const arr = byMon.get(c.monitor) ?? [];
 		arr.push(c);
@@ -162,11 +166,11 @@ export async function getFleetUptime24h(pb: PocketBase): Promise<number | null> 
 
 	// The in-flight hour, which no bucket covers yet.
 	const partial = await pb.collection('checks').getList(1, 1, {
-		filter: `checked_at >= "${pbDate(new Date(hourStart))}"`
+		filter: `checked_at >= "${pbDate(new Date(hourStart))}" && ${COUNTED_CHECKS}`
 	});
 	if (partial.totalItems > 0) {
 		const up = await pb.collection('checks').getList(1, 1, {
-			filter: `checked_at >= "${pbDate(new Date(hourStart))}" && up=true`
+			filter: `checked_at >= "${pbDate(new Date(hourStart))}" && ${COUNTED_CHECKS} && up=true`
 		});
 		weighted += up.totalItems;
 		counted += partial.totalItems;
@@ -225,16 +229,19 @@ export type OpenIncident = {
  *  to empty rather than failing the whole dashboard if the filter is rejected. */
 export async function getOpenIncidents(pb: PocketBase): Promise<OpenIncident[]> {
 	try {
-		const r = await pb.collection('incidents').getList(1, 20, {
-			filter: `resolved_at = ""`,
-			sort: '-started_at',
-			expand: 'monitor'
-		});
+		const [r, labels] = await Promise.all([
+			pb.collection('incidents').getList(1, 20, {
+				filter: `resolved_at = ""`,
+				sort: '-started_at',
+				expand: 'monitor'
+			}),
+			getZoneLabels(pb)
+		]);
 		return r.items.map((i) => ({
 			id: i.id,
 			monitorId: i.monitor,
 			monitor: i.expand?.monitor?.name ?? '(deleted monitor)',
-			cause: i.cause ?? '',
+			cause: nameZonesInText(i.cause ?? '', labels),
 			started_at: i.started_at
 		}));
 	} catch (err) {
@@ -274,7 +281,12 @@ export async function getZoneStats(pb: PocketBase): Promise<ZoneStat[]> {
 		.map((z) => {
 			const code = z.zone as string;
 			const label = zones.get(code) ?? fallbackZone(code);
-			return { zone: code, label: label.displayName, sortOrder: label.sortOrder, healthy: !isStale(z.updated as string) };
+			return {
+				zone: code,
+				label: label.displayName,
+				sortOrder: label.sortOrder,
+				healthy: !isStale(z.updated as string)
+			};
 		})
 		.sort((a, b) => a.sortOrder - b.sortOrder || a.zone.localeCompare(b.zone))
 		.map(({ zone, label, healthy }) => ({ zone, label, healthy }));

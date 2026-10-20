@@ -1,9 +1,24 @@
-import { json, type RequestHandler } from '@sveltejs/kit';
-import { env } from '$env/dynamic/private';
+import type { RequestHandler } from '@sveltejs/kit';
+
+import {
+	HEALTH_STALE_SECONDS,
+	WEB_BEAT_STALE_SECONDS,
+	PB_URL,
+	HEALTH_DEBUG_TOKEN
+} from '$app/env/private';
+
 import { timingSafeEqual } from 'node:crypto';
-import { serviceClient } from '$lib/server/service-pb';
-import { accessHeaders } from '$lib/server/pb-client';
-import { buildItems, overallStatus, publicBody, debugBody, type ZoneRow } from '$lib/server/health';
+import { serviceClient } from '#lib/server/service-pb.js';
+import { accessHeaders } from '#lib/server/pb-client.js';
+import {
+	buildItems,
+	overallStatus,
+	publicBody,
+	debugBody,
+	staleLimits,
+	type ZoneRow
+} from '#lib/server/health.js';
+import { APP_VERSION, APP_COMMIT } from '#lib/version.js';
 
 // Public fleet-health endpoint (Option 1 of the web-health design). Aggregates
 // from PocketBase only — so it works even when the web is on Netlify and can't
@@ -14,25 +29,24 @@ import { buildItems, overallStatus, publicBody, debugBody, type ZoneRow } from '
 // No user auth — it must be pollable by an external uptime monitor. Reads
 // zone_stats via the web service account.
 
-const STALE_MS = (Number(env.HEALTH_STALE_SECONDS) || 90) * 1000;
-// The web liveness beat is a 2-minute cron (wrangler.toml [triggers]), so it is
-// judged on its own clock — 5 minutes, the window that file already documents,
-// which also survives one missed run. Sharing HEALTH_STALE_SECONDS made a healthy
-// deployment report degraded for part of every cycle.
-const WEB_STALE_MS = (Number(env.WEB_BEAT_STALE_SECONDS) || 300) * 1000;
+const { staleMs: STALE_MS, webStaleMs: WEB_STALE_MS } = staleLimits({
+	HEALTH_STALE_SECONDS,
+	WEB_BEAT_STALE_SECONDS
+});
 
 async function pbReachable(): Promise<boolean> {
-	if (!env.PB_URL) return false;
+	if (!PB_URL) return false;
 	try {
 		// Access headers, exactly as pb-client warns: a raw fetch to PocketBase that
 		// skips the SDK still has to authenticate to Cloudflare Access, or it gets a
 		// 403 and this reports "unreachable" for a PocketBase that is perfectly
 		// healthy — permanently, since the condition never clears. Empty in dev,
 		// where Access is not in the path.
-		const res = await fetch(`${env.PB_URL}/api/health`, {
+		const res = await fetch(`${PB_URL}/api/health`, {
 			headers: accessHeaders(),
 			signal: AbortSignal.timeout(4000)
 		});
+
 		return res.ok;
 	} catch {
 		return false;
@@ -51,7 +65,7 @@ async function readZoneRows(): Promise<ZoneRow[]> {
 // Constant-time bearer-token check. A blank configured token is never authorized;
 // a missing/wrong token silently falls back to the public body (no 401, no hint).
 function authorized(request: Request): boolean {
-	const token = env.HEALTH_DEBUG_TOKEN;
+	const token = HEALTH_DEBUG_TOKEN;
 	if (!token) return false;
 	const header = request.headers.get('authorization') ?? '';
 	const prefix = 'Bearer ';
@@ -85,5 +99,6 @@ export const GET: RequestHandler = async ({ request }) => {
 	});
 	const code = overallStatus(items) === 'degraded' ? 503 : 200;
 	const body = authorized(request) ? debugBody(items) : publicBody(items);
-	return json(body, { status: code });
+	// The version answers "is the build I just deployed the one serving?" (#489).
+	return Response.json({ ...body, version: APP_VERSION, commit: APP_COMMIT }, { status: code });
 };

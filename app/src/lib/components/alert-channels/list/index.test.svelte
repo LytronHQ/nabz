@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { AlertChannelItem } from '$lib/models/alert-channel';
+	import type { AlertChannelItem } from '#lib/models/alert-channel.js';
 	import { List } from '../';
 
 	const data = [

@@ -1,9 +1,9 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
-	import type { AlertChannelItem } from '$lib/models/alert-channel';
-	import type { EntityIdType } from '$lib/constants';
-	import { Icon, Pill } from '$lib/components/common';
-	import { channelTarget } from '$lib/utils/channel-display';
+	import type { AlertChannelItem } from '#lib/models/alert-channel.js';
+	import type { EntityIdType } from '#lib/constants.js';
+	import { Icon, Pill } from '#lib/components/common/index.js';
+	import { channelTarget } from '#lib/utils/channel-display.js';
 
 	interface Props {
 		data: AlertChannelItem[];

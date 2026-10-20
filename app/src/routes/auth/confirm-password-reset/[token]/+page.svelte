@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
-	import { H3, Meta, Alert } from '$lib/components/common';
+	import { Alert, AuthCard, Meta } from '#lib/components/common/index.js';
 	import type { ActionData, PageData } from './$types';
 
 	interface Props {
@@ -13,10 +13,10 @@
 
 <Meta title="Reset password" />
 
-<div class="max-w-sm mx-auto mt-8">
-	<form class="flex flex-col space-y-3" method="POST">
-		{#if form}
-			{#if form.message}
+{#if data.email}
+	<AuthCard title="Set a new password" sub="For {data.email}">
+		<form method="POST">
+			{#if form?.message}
 				<Alert tone={form.success ? 'success' : 'error'}>
 					{form.message}
 					{#if form.errors}
@@ -28,21 +28,33 @@
 					{/if}
 				</Alert>
 			{/if}
-		{/if}
-		<H3>Reset password for <b>{data.email}</b></H3>
-		<label class="space-y-2 block">
-			<span class="form-lbl">New password</span>
-			<input type="password" name="password" class="form-input block w-full" required />
-		</label>
-		<label class="space-y-2 block">
-			<span class="form-lbl">New password confirm</span>
-			<input type="password" name="confirmPassword" class="form-input block w-full" required />
-		</label>
-		<button type="submit" class="btn btn-primary w-full justify-center">Set new password</button>
-		<p class="text-gray-500 dark:text-gray-400">
-			<a href={resolve('/signin')} class="text-primary-600 hover:underline dark:text-primary-500">
-				Or go back to login
-			</a>
-		</p>
-	</form>
-</div>
+			<div class="field">
+				<label for="password">New password</label>
+				<input id="password" type="password" name="password" autocomplete="new-password" required />
+			</div>
+			<div class="field">
+				<label for="confirmPassword">Confirm new password</label>
+				<input
+					id="confirmPassword"
+					type="password"
+					name="confirmPassword"
+					autocomplete="new-password"
+					required
+				/>
+			</div>
+			<button type="submit" class="btn btn-primary btn-block">Set new password</button>
+		</form>
+		<p class="auth-alt"><a href={resolve('signin')}>Back to sign in</a></p>
+	</AuthCard>
+{:else}
+	<AuthCard title="This link doesn't work">
+		<Alert tone="error">
+			This password reset link is invalid or incomplete. Reset links are single-use and expire — ask
+			for a new one.
+		</Alert>
+
+		<a class="btn btn-primary btn-block" href={resolve('reset-password')}>Send a new link</a>
+
+		<p class="auth-alt"><a href={resolve('signin')}>Back to sign in</a></p>
+	</AuthCard>
+{/if}

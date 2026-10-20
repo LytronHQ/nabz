@@ -26,6 +26,24 @@ export const EVALUATOR_ZONE = 'evaluator';
 // healthy through an outage of this path.
 export const WEB_ZONE = 'web';
 
+// How long a heartbeat may be silent before it counts as stale. One definition
+// for /api/health and the admin usage page: the usage page used to apply a flat
+// 30 s to every row, so the web's 2-minute cron beat showed "Stale" for most of
+// every cycle while /api/health said ok (#611).
+//
+// Workers and the evaluator beat every few seconds. The web beat is a 2-minute
+// cron (wrangler.toml [triggers]), so it gets 5 minutes, which also survives one
+// missed run.
+export function staleLimits(env: {
+	HEALTH_STALE_SECONDS?: string;
+	WEB_BEAT_STALE_SECONDS?: string;
+}) {
+	return {
+		staleMs: (Number(env.HEALTH_STALE_SECONDS) || 90) * 1000,
+		webStaleMs: (Number(env.WEB_BEAT_STALE_SECONDS) || 300) * 1000
+	};
+}
+
 export type NodeStatus = 'ok' | 'unreachable' | 'stale';
 export type ItemKind = 'pocketbase' | 'evaluator' | 'zone' | 'web';
 

@@ -1,12 +1,9 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
-	import { browser } from '$app/environment';
 	import { goto } from '$app/navigation';
 	import { enhance, applyAction } from '$app/forms';
-	import Icon from '@iconify/svelte';
 	import type { ActionData, PageData } from './$types';
-	import { createAuthCookie, type AuthProviderCallbackData } from '$lib/utils/auth-cookie-utils';
-	import { Meta } from '$lib/components/common';
+	import { Meta, OAuthButtons } from '#lib/components/common/index.js';
 
 	interface Props {
 		data: PageData;
@@ -17,13 +14,6 @@
 
 	function clearForm() {
 		form = null;
-	}
-
-	function gotoAuthProvider(provider: AuthProviderCallbackData) {
-		if (browser) {
-			createAuthCookie(provider, data.key);
-		}
-		window.location.href = provider.redirectUrl || '';
 	}
 </script>
 
@@ -41,7 +31,7 @@
 						message:
 							'You have successfully registered. Please check your email to verify your account.'
 					};
-					setTimeout(() => goto(resolve('/signin')), 3000);
+					setTimeout(() => goto(resolve('signin')), 3000);
 					return;
 				}
 				await applyAction(result);
@@ -56,7 +46,7 @@
 					stroke="#fff"
 					stroke-width="2.4"
 					stroke-linecap="round"
-					stroke-linejoin="round"><path d="M3 12h4l2.5-7 5 14 2.5-7H21" /></svg
+					stroke-linejoin="round"><path d="M3 12h4l2.5-7 5 14 2.5-7H21"></path></svg
 				>
 			</span>
 			<b style="font-size:14.5px">nabz</b>
@@ -82,6 +72,8 @@
 				{/if}
 			</div>
 		{/if}
+
+		<OAuthButtons providers={data.providers ?? []} />
 
 		<div class="field">
 			<label for="email">Email</label>
@@ -124,26 +116,9 @@
 			onclick={clearForm}>Sign up</button
 		>
 
-		{#if data.providers && data.providers.length}
-			<div style="display:flex;align-items:center;gap:10px;margin:18px 0 4px">
-				<span style="flex:1;height:1px;background:var(--border)"></span>
-				<span class="mono" style="font-size:11px;color:var(--ink-3)">or continue with</span>
-				<span style="flex:1;height:1px;background:var(--border)"></span>
-			</div>
-			<div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
-				{#each data.providers as provider (provider.name)}
-					<button
-						type="button"
-						class="icon-btn"
-						title={provider.name}
-						onclick={() => gotoAuthProvider(provider)}
-					>
-						<Icon width="22" icon={'devicon:' + provider.name} />
-					</button>
-				{/each}
-			</div>
-		{/if}
-
-		<p class="auth-alt">Already have an account? <a href={resolve('/signin')}>Sign in</a></p>
+		<p class="auth-alt">
+			Already have an account?
+			<a href={resolve('signin')}>Sign in</a>
+		</p>
 	</form>
 </div>

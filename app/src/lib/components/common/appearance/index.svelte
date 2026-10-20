@@ -8,7 +8,7 @@
 		initAppearance,
 		ACCENTS,
 		ACCENT_HEX
-	} from '$lib/appearance';
+	} from '#lib/appearance.js';
 
 	onMount(initAppearance);
 </script>
@@ -20,6 +20,7 @@
 		<button
 			type="button"
 			class:on={$theme === 'system'}
+			aria-pressed={$theme === 'system'}
 			onclick={() => setTheme('system')}
 			title="System"
 			aria-label="System theme"
@@ -37,6 +38,7 @@
 		<button
 			type="button"
 			class:on={$theme === 'light'}
+			aria-pressed={$theme === 'light'}
 			onclick={() => setTheme('light')}
 			title="Light"
 			aria-label="Light theme"
@@ -56,6 +58,7 @@
 		<button
 			type="button"
 			class:on={$theme === 'dark'}
+			aria-pressed={$theme === 'dark'}
 			onclick={() => setTheme('dark')}
 			title="Dark"
 			aria-label="Dark theme"

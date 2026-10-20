@@ -1,4 +1,4 @@
-import type { EntityIdType } from '$lib/constants';
+import type { EntityIdType } from '#lib/constants.js';
 import type { IBaseEntity, PaginationData } from '.';
 
 export default class BaseEntityList<T extends IBaseEntity> {

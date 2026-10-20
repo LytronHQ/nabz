@@ -1,5 +1,9 @@
 import { test, expect } from 'vitest';
-import { BaseEntityList, PaginationData } from '$lib/models';
+import { BaseEntityList, PaginationData } from '#lib/models/index.js';
+
+// Raw page metadata, not a full PaginationData instance.
+const pagination = (raw: object) =>
+	new PaginationData(raw as ConstructorParameters<typeof PaginationData>[0]);
 
 type ExampleType = {
 	id: string;
@@ -14,7 +18,7 @@ test('BaseEntityList Test 1', () => {
 				name: 'Example 1'
 			}
 		],
-		new PaginationData({ current: 1, size: 3, totalItems: 0 } as any)
+		pagination({ current: 1, size: 3, totalItems: 0 })
 	);
 
 	expect(list.hasItems).toBe(true);
@@ -38,7 +42,7 @@ test('BaseEntityList Test 2', () => {
 				name: 'Example 1'
 			}
 		],
-		new PaginationData({ current: 1, size: 10, totalItems: 0 } as any)
+		pagination({ current: 1, size: 10, totalItems: 0 })
 	);
 
 	expect(list.hasItems).toBe(true);
@@ -62,7 +66,7 @@ test('BaseEntityList Test 3', () => {
 	}));
 	const list = new BaseEntityList<ExampleType>(
 		items,
-		new PaginationData({ current: 1, size: 10, totalItems: 1000 } as any)
+		pagination({ current: 1, size: 10, totalItems: 1000 })
 	);
 
 	expect(list.hasItems).toBe(true);

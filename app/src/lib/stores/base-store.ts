@@ -1,6 +1,11 @@
 import { get } from 'svelte/store';
-import LoadingStore from '$lib/stores/loading-store';
-import ErrorStore from '$lib/stores/error-store';
+import LoadingStore from '#lib/stores/loading-store.js';
+import ErrorStore from '#lib/stores/error-store.js';
+
+/** False until a list's first load lands: the stores start from `{}`, which has no items. */
+export function isLoaded(list: { items?: unknown } | undefined): boolean {
+	return Array.isArray(list?.items);
+}
 
 export default class BaseStore {
 	loading = new LoadingStore();

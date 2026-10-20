@@ -1,6 +1,6 @@
 import { redirect } from '@sveltejs/kit';
 import type { PageServerLoad } from './$types';
-import { changelogVisible } from '$lib/server/changelog';
+import { changelogVisible } from '#lib/server/changelog.js';
 
 export const load: PageServerLoad = async ({ locals }) => {
 	// Logged-in users go straight to the app; everyone else sees the landing page.

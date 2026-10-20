@@ -1,13 +1,13 @@
-import { json, type RequestHandler } from '@sveltejs/kit';
+import type { RequestHandler } from '@sveltejs/kit';
 import {
 	AlertChannelItem,
 	AlertChannelItemValidator,
 	AlertChannelNewItem,
 	toChannelConfig
-} from '$lib/models/alert-channel';
-import { failIfNoResponse, failIfNoUser } from '$lib/utils/api-utils';
-import { DefaultPageSize } from '$lib/constants';
-import { getApiErrors } from '$lib/utils/action-utils';
+} from '#lib/models/alert-channel.js';
+import { failIfNoResponse, failIfNoUser } from '#lib/utils/api-utils.js';
+import { DefaultPageSize } from '#lib/constants.js';
+import { getApiErrors } from '#lib/utils/action-utils.js';
 
 export const GET: RequestHandler = async ({ locals, url }) => {
 	failIfNoUser(locals);
@@ -24,9 +24,12 @@ export const GET: RequestHandler = async ({ locals, url }) => {
 		});
 
 		const result = failIfNoResponse(response);
-		return json({ ...result, items: result.items.map((item: any) => new AlertChannelItem(item)) });
+		return Response.json({
+			...result,
+			items: result.items.map((item) => new AlertChannelItem(item))
+		});
 	} catch (err) {
-		return json(getApiErrors(err, 'Error getting alert channels'), { status: 500 });
+		return Response.json(getApiErrors(err, 'Error getting alert channels'), { status: 500 });
 	}
 };
 
@@ -49,8 +52,8 @@ export const POST: RequestHandler = async ({ locals, request }) => {
 		});
 
 		const item = failIfNoResponse(response);
-		return json(new AlertChannelItem(item), { status: 201 });
+		return Response.json(new AlertChannelItem(item), { status: 201 });
 	} catch (err) {
-		return json(getApiErrors(err, 'Error creating alert channel'), { status: 500 });
+		return Response.json(getApiErrors(err, 'Error creating alert channel'), { status: 500 });
 	}
 };

@@ -450,6 +450,15 @@
       },
       {
         "hidden": false,
+        "id": "bool_inconclusive",
+        "name": "inconclusive",
+        "presentable": false,
+        "required": false,
+        "system": false,
+        "type": "bool"
+      },
+      {
+        "hidden": false,
         "id": "date000000021",
         "max": "",
         "min": "",
@@ -888,7 +897,8 @@
           "slack",
           "telegram",
           "discord",
-          "pagerduty"
+          "pagerduty",
+          "push"
         ]
       },
       {
@@ -1205,6 +1215,97 @@
     ]
   },
   {
+    "id": "workerbeats001",
+    "name": "worker_heartbeats",
+    "type": "base",
+    "system": false,
+    "listRule": "@request.auth.collectionName = \"service_accounts\"",
+    "viewRule": "@request.auth.collectionName = \"service_accounts\"",
+    "createRule": "@request.auth.role = \"worker\"",
+    "updateRule": "@request.auth.role = \"worker\"",
+    "deleteRule": null,
+    "fields": [
+      {
+        "autogeneratePattern": "[a-z0-9]{15}",
+        "hidden": false,
+        "id": "text3208210256",
+        "max": 15,
+        "min": 15,
+        "name": "id",
+        "pattern": "^[a-z0-9]+$",
+        "presentable": false,
+        "primaryKey": true,
+        "required": true,
+        "system": true,
+        "type": "text"
+      },
+      {
+        "autogeneratePattern": "",
+        "hidden": false,
+        "id": "text_wb_zone01",
+        "max": 0,
+        "min": 0,
+        "name": "zone",
+        "pattern": "",
+        "presentable": false,
+        "primaryKey": false,
+        "required": true,
+        "system": false,
+        "type": "text"
+      },
+      {
+        "autogeneratePattern": "",
+        "hidden": false,
+        "id": "text_wb_workr1",
+        "max": 0,
+        "min": 0,
+        "name": "worker",
+        "pattern": "",
+        "presentable": false,
+        "primaryKey": false,
+        "required": true,
+        "system": false,
+        "type": "text"
+      },
+      {
+        "hidden": false,
+        "id": "num_wb_beats1",
+        "max": null,
+        "min": null,
+        "name": "beats",
+        "onlyInt": true,
+        "presentable": false,
+        "required": false,
+        "system": false,
+        "type": "number"
+      },
+      {
+        "hidden": false,
+        "id": "autodate_wb_01",
+        "name": "created",
+        "onCreate": true,
+        "onUpdate": false,
+        "presentable": false,
+        "system": false,
+        "type": "autodate"
+      },
+      {
+        "hidden": false,
+        "id": "autodate_wb_02",
+        "name": "updated",
+        "onCreate": true,
+        "onUpdate": true,
+        "presentable": false,
+        "system": false,
+        "type": "autodate"
+      }
+    ],
+    "indexes": [
+      "CREATE UNIQUE INDEX `idx_worker_heartbeats_zone_worker` ON `worker_heartbeats` (`zone`, `worker`)",
+      "CREATE INDEX `idx_worker_heartbeats_zone` ON `worker_heartbeats` (`zone`)"
+    ]
+  },
+  {
     "id": "svcaccounts0001",
     "listRule": null,
     "viewRule": null,
@@ -1314,7 +1415,7 @@
     "authRule": "",
     "manageRule": null,
     "authAlert": {
-      "enabled": true,
+      "enabled": false,
       "emailTemplate": {
         "subject": "Login from a new location",
         "body": "<p>Hello,</p>\n<p>We noticed a login to your {APP_NAME} account from a new location:</p>\n<p><em>{ALERT_INFO}</em></p>\n<p><strong>If this wasn't you, you should immediately change your {APP_NAME} account password to revoke access from all other locations.</strong></p>\n<p>If this was you, you may disregard this email.</p>\n<p>\n  Thanks,<br/>\n  {APP_NAME} team\n</p>"
@@ -1637,7 +1738,10 @@
         "values": [
           "test",
           "incident",
-          "recovery"
+          "recovery",
+          "cert",
+          "latency",
+          "domain"
         ]
       },
       {

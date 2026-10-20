@@ -1,5 +1,5 @@
 import { test, expect } from 'vitest';
-import { render, screen, within } from '@testing-library/svelte';
+import { render, screen } from '@testing-library/svelte';
 
 import Test from './index.test.svelte';
 test('pagination', () => {

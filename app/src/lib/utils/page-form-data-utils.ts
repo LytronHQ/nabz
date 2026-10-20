@@ -1,9 +1,11 @@
 import { format } from '@formkit/tempo';
 
-export async function getFormData(data: any) {
+export async function getFormData(data: object) {
 	const fd = new FormData();
 	for (const [key, val] of Object.entries(data)) {
 		if (val === undefined || val === null) {
+			// Skipped on purpose: an absent value must not reach the server as the
+			// string "undefined" or "null".
 		} else if (val instanceof File) {
 			fd.append(key, val);
 		} else if (val instanceof Date) {
@@ -13,7 +15,7 @@ export async function getFormData(data: any) {
 		} else if (typeof val === 'object') {
 			fd.append(key, JSON.stringify(val));
 		} else {
-			fd.append(key, val as any);
+			fd.append(key, String(val));
 		}
 	}
 

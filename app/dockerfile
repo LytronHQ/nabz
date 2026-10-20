@@ -1,7 +1,12 @@
 # The SvelteKit app as a standalone Node server (adapter-node), for self-hosting
 # on a web VM (deploy/web.yml). Netlify is unaffected — it builds with adapter-auto
-# (ADAPTER unset). Runtime config (PB_URL, PKCE key, ORIGIN) is read from the
-# environment at runtime via $env/dynamic/private, so no rebuild to repoint.
+# (ADAPTER unset). Runtime config (PB_URL, PKCE key, ...) is read from the
+# environment at runtime via $app/env/private, so no rebuild to repoint.
+#
+# ORIGIN is the exception: adapter-node 6 (SvelteKit 3) no longer reads it at
+# runtime, and without it the origin is guessed from the Host header as https,
+# which fails the CSRF check on every sign-in over plain http. It is now baked in
+# at build time as `paths.origin` (vite.config.ts), so pass it as a build arg.
 #
 # Build context is the REPO ROOT (see deploy/web.yml) so CHANGELOG.md is available
 # to the /changelog page's build-time `?raw` import.
@@ -12,8 +17,13 @@ RUN npm ci
 # CHANGELOG.md lives at the repo root; place it one level above the app dir so the
 # import (../../../../CHANGELOG.md, from app/src/lib/server/) resolves to it.
 COPY CHANGELOG.md /CHANGELOG.md
+# The web shows the same version as the nodes: vite.config.ts reads ../VERSION.
+# There is no .git in the image, so the commit comes in as a build arg (#489).
+COPY VERSION /VERSION
 COPY app/ ./
-RUN ADAPTER=node npm run build && npm prune --omit=dev
+ARG GIT_COMMIT=""
+ARG ORIGIN=""
+RUN GIT_COMMIT="$GIT_COMMIT" ORIGIN="$ORIGIN" ADAPTER=node npm run build && npm prune --omit=dev
 
 FROM node:22-alpine
 WORKDIR /app

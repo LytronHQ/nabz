@@ -1,0 +1,51 @@
+# A worker on Fly.io, so a zone can span hosts: zone `eu` as one worker on a
+# Hetzner VM in Germany and one here in the Netherlands. They split the zone's
+# monitors between them by roster position — see docs/scaling.md.
+#
+# Deployed by deploy/remote-deploy.sh along with the Hetzner fleet, from the same
+# commit, because two workers in one zone must never run different versions.
+# The app name and region come from the env file; this file holds only what is
+# the same everywhere.
+#
+#   fly deploy . --config fly/fly.toml --dockerfile worker/dockerfile --app <name>
+#
+# The build context is the REPO ROOT, not this directory: worker/dockerfile
+# copies corelib/, which lives outside worker/.
+
+app = "nabz-worker"
+primary_region = "ams"
+
+[build]
+  dockerfile = "worker/dockerfile"
+
+[env]
+  # This machine has no route to the private network, so it reaches PocketBase
+  # through the public tunnel; PB_URL and the Access token are set as secrets.
+  PB_AUTH_COLLECTION = "service_accounts"
+  # No HTTP surface. The worker makes outbound checks and writes to PocketBase;
+  # nothing needs to reach it, so there is no service to expose and no port to
+  # publish. Its liveness is visible where it matters — in worker_heartbeats.
+  HEALTH_ADDR = "off"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
+
+# Deliberately NO [http_service] / [[services]] block.
+#
+# auto_stop_machines and min_machines_running are properties of Fly's PROXY: it
+# stops a machine when no requests arrive and starts it when one does. A worker
+# receives no requests, so under a service definition it would look idle and be
+# stopped — the opposite of what a checker needs. With no service at all the
+# proxy never touches it and the machine runs continuously, which is the intent
+# behind "auto-stop off, min machines 1".
+#
+# The count is held at one by `fly scale count 1` in remote-deploy.sh. Two
+# machines would be two workers, which the roster handles correctly (they would
+# split the shard) but which nobody asked for.
+
+[deploy]
+  # One machine, so there is no rolling window to manage: replace it and let the
+  # roster reshuffle. The zone's other workers cover its monitors within the
+  # roster TTL.
+  strategy = "immediate"

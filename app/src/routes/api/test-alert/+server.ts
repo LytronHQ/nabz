@@ -1,5 +1,5 @@
-import { json, type RequestHandler } from '@sveltejs/kit';
-import { failIfNoUser } from '$lib/utils/api-utils';
+import type { RequestHandler } from '@sveltejs/kit';
+import { failIfNoUser } from '#lib/utils/api-utils.js';
 
 // POST /api/test-alert  { channel?: id }
 // Queues a test-alert request; the evaluator delivers it to the given channel
@@ -24,7 +24,7 @@ export const POST: RequestHandler = async ({ locals, request }) => {
 			.create({ user: userId, channel, status: 'pending' });
 	} catch (err) {
 		console.warn('create test alert failed:', err);
-		return json({ error: 'Could not queue test alert' }, { status: 500 });
+		return Response.json({ error: 'Could not queue test alert' }, { status: 500 });
 	}
 
 	// The evaluator's loop runs ~every 10s; poll the record for its result.
@@ -38,11 +38,15 @@ export const POST: RequestHandler = async ({ locals, request }) => {
 				// "Notified N channel(s)" == fully delivered; anything else (failed /
 				// partial / skipped) is not a clean success.
 				const ok = /^Notified \d+ channel/.test(result);
-				return json({ done: true, ok, result });
+				return Response.json({ done: true, ok, result });
 			}
 		} catch {
 			// transient — keep polling
 		}
 	}
-	return json({ done: false, ok: false, result: 'Test queued — check your channel shortly.' });
+	return Response.json({
+		done: false,
+		ok: false,
+		result: 'Test queued — check your channel shortly.'
+	});
 };

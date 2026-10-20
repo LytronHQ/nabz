@@ -62,11 +62,15 @@ export function isInMaintenance(
 /**
  * The display state of a single check. 429/403 mean the target rate-limited or
  * bot-blocked us — neither up nor a real down — mirroring the worker/evaluator.
+ * 'not-counted' is a failure the worker blamed on its own network (#598): its
+ * canaries failed too, so it is no verdict on the site and uptime leaves it out.
  */
 export function checkState(c: {
 	up?: boolean;
 	status_code?: number | null;
-}): 'up' | 'down' | 'rate-limited' {
+	inconclusive?: boolean;
+}): 'up' | 'down' | 'rate-limited' | 'not-counted' {
+	if (c.inconclusive && !c.up) return 'not-counted';
 	if (c.status_code === 429 || c.status_code === 403) return 'rate-limited';
 	return c.up ? 'up' : 'down';
 }

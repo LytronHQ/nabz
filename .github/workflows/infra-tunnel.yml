@@ -33,14 +33,37 @@ jobs:
           TUNNEL_HOSTNAME: ${{ vars.PB_HOSTNAME }}
           TUNNEL_NAME: ${{ vars.TUNNEL_NAME }}
           PB_BIND_IP: ${{ secrets.PB_BIND_IP }}
+          # Where the CONNECTOR sends traffic, resolved where it runs — not here.
+          # cloudflared runs as a container beside PocketBase in the same compose
+          # project, so Docker's DNS resolves this name. The host's private address
+          # looks equivalent and is not: that traffic leaves the container from the
+          # Docker bridge and meets the host firewall, which allows only the
+          # private subnet to :8090 and drops it. Every request then times out
+          # while PocketBase answers fine from the host itself.
+          TUNNEL_ORIGIN: http://pocketbase:8090
           GH_TOKEN: ${{ secrets.GH_SECRETS_PAT }}
           ENV_NAME: ${{ inputs.environment }}
         run: |
           set -euo pipefail
+          # Not an input to the tunnel — an ordering check. A tunnel in front of a
+          # node that does not exist yet is pointless, and PB_BIND_IP is only set
+          # once infra-hetzner has provisioned one.
+          ./deploy/ops-fetch.sh
           [ -n "$PB_BIND_IP" ] || { echo "::error::PB_BIND_IP is not set — run infra-hetzner first"; exit 1; }
+          [ -n "$TUNNEL_NAME" ] || { echo "::error::TUNNEL_NAME is not set for this environment"; exit 1; }
+          # --name explicitly: the module defaults it to the hostname, and this
+          # tunnel is named by TUNNEL_NAME. A different name would create a SECOND
+          # tunnel beside the live one rather than finding it.
+          #
+          # The API token goes in on stdin, never in argv: argv is world-readable
+          # through ps.
+          #
           # The token is the last line on stdout; everything else goes to stderr.
           # Captured, never printed.
-          out="$(./deploy/cloudflare/tunnel.sh)"
+          out="$(printf '%s' "$CF_API_TOKEN" | ./deploy/.ops/edge.sh tunnel \
+                 --hostname "$TUNNEL_HOSTNAME" --origin "$TUNNEL_ORIGIN" \
+                 --account-id "$CF_ACCOUNT_ID" --api-token-file - \
+                 --zone "$CF_ZONE_NAME" --name "$TUNNEL_NAME")"
           token="${out#TUNNEL_TOKEN=}"
           [ -n "$token" ] && [ "$token" != "$out" ] || { echo "::error::no tunnel token returned"; exit 1; }
           gh secret set TUNNEL_TOKEN --env "$ENV_NAME" --repo "${{ github.repository }}" --body "$token"

@@ -1,9 +1,9 @@
 import { randomBytes, createHmac } from 'node:crypto';
 import { isIP } from 'node:net';
 import type { Cookies } from '@sveltejs/kit';
-import { dev } from '$app/environment';
-import { env } from '$env/dynamic/private';
-import { encrypt, decrypt } from '$lib/cipher-utils';
+import { dev } from '$app/env';
+import { PKCE_FLOW_ENCRYPTION_KEY } from '$app/env/private';
+import { encrypt, decrypt } from '#lib/cipher-utils.js';
 
 // Anonymous "try it" session + limits (#269, epic #265).
 //
@@ -24,10 +24,12 @@ export const ANON_TTL_SECONDS = 60 * 60; // 1h — matches the cleanup TTL (#270
 // 48 hex chars from 24 random bytes.
 const TOKEN_RE = /^[a-f0-9]{48}$/;
 
-// The cookie is AES-signed with the app key (also used for the OAuth PKCE cookie);
-// a dev fallback keeps local/test runs working when it isn't set.
+// The cookie is AES-sealed and IPs are HMAC'd with a key DERIVED from the app
+// key, not the app key itself: the same raw key also seals the OAuth cookie, and
+// when it leaked (#580) it opened both. A dev fallback keeps local/test runs working.
 function secret(): string {
-	return env.PKCE_FLOW_ENCRYPTION_KEY || 'anon-dev-secret';
+	const base = PKCE_FLOW_ENCRYPTION_KEY || 'anon-dev-secret';
+	return createHmac('sha256', base).update('nabz-anon-session-v1').digest('hex');
 }
 
 export function mintAnonToken(): string {
@@ -76,6 +78,7 @@ function blockedIPLiteral(host: string): boolean {
 	const v = isIP(host);
 	if (v === 4) {
 		const p = host.split('.').map(Number);
+
 		return (
 			p[0] === 0 ||
 			p[0] === 127 ||
@@ -83,19 +86,22 @@ function blockedIPLiteral(host: string): boolean {
 			(p[0] === 192 && p[1] === 168) ||
 			(p[0] === 169 && p[1] === 254) ||
 			(p[0] === 172 && p[1] >= 16 && p[1] <= 31) ||
-			(p[0] === 100 && p[1] >= 64 && p[1] <= 127) // CGNAT
+			(p[0] === 100 && p[1] >= 64 && p[1] <= 127)
 		);
+		// CGNAT
 	}
 	if (v === 6) {
 		const h = host.toLowerCase();
+
 		return (
 			h === '::1' ||
 			h === '::' ||
 			h.startsWith('fc') ||
 			h.startsWith('fd') || // unique-local
 			h.startsWith('fe80') || // link-local
-			h.startsWith('::ffff:') // IPv4-mapped
+			h.startsWith('::ffff:')
 		);
+		// IPv4-mapped
 	}
 	return false;
 }

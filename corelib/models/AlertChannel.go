@@ -5,7 +5,7 @@ package models
 type AlertChannel struct {
 	Id   string `json:"id"`
 	User string `json:"user"`
-	Type string `json:"type"` // email | webhook | slack | discord | telegram | pagerduty
+	Type string `json:"type"` // email | webhook | slack | discord | telegram | pagerduty | push
 	// Target is the legacy single-string destination. Superseded by Config; kept
 	// so channels created before the structured-config change keep working.
 	Target  string             `json:"target"`
@@ -21,6 +21,11 @@ type AlertChannelConfig struct {
 	BotToken   string `json:"botToken,omitempty"`   // telegram
 	ChatID     string `json:"chatId,omitempty"`     // telegram
 	RoutingKey string `json:"routingKey,omitempty"` // pagerduty
+	// push: one device's PushSubscription (#602). Endpoint is the push service
+	// URL; P256dh and Auth are the keys the payload is encrypted to.
+	Endpoint string `json:"endpoint,omitempty"`
+	P256dh   string `json:"p256dh,omitempty"`
+	Auth     string `json:"auth,omitempty"`
 }
 
 // Address returns the single destination/credential for the single-value channel
@@ -40,6 +45,8 @@ func (a AlertChannel) Address() string {
 		if a.Config.RoutingKey != "" {
 			return a.Config.RoutingKey
 		}
+	case "push":
+		return a.Config.Endpoint
 	}
 	return a.Target
 }

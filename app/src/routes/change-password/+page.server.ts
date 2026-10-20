@@ -1,8 +1,8 @@
 import { type Actions, fail, redirect } from '@sveltejs/kit';
 import { z } from 'zod';
 import type { PageServerLoad } from './$types';
-import { getActionFailure, getFormRecord } from '$lib/utils/action-utils';
-import { changePassword } from '$lib/server/password';
+import { getActionFailure, getFormRecord } from '#lib/utils/action-utils.js';
+import { changePassword } from '#lib/server/password.js';
 
 // The forced password-change page (#392). Deliberately its own route rather than
 // a redirect to /account: the gate's promise is that nothing else is reachable

@@ -1,9 +1,11 @@
 import { error, redirect } from '@sveltejs/kit';
 import type { PageServerLoad } from './$types';
-import { MonitorItem } from '$lib/models/monitor';
-import { computeUptime24h, fetchRecentChecks } from '$lib/server/checks';
-import { getOpenIncidentForMonitor } from '$lib/server/incidents';
-import { getAvailabilityTable, getAvailabilityOverview } from '$lib/server/availability';
+import { MonitorItem } from '#lib/models/monitor.js';
+import { computeUptime24h, fetchRecentChecks } from '#lib/server/checks.js';
+import { getOpenIncidentForMonitor } from '#lib/server/incidents.js';
+import { getAvailabilityTable, getAvailabilityOverview } from '#lib/server/availability.js';
+import { getZones } from '#lib/server/zones.js';
+import type { ZoneLabel } from '#lib/utils/zone-order.js';
 
 export const load: PageServerLoad = async ({ locals, params }) => {
 	if (!locals.user) {
@@ -19,13 +21,20 @@ export const load: PageServerLoad = async ({ locals, params }) => {
 		throw error(404, 'Monitor not found');
 	}
 
-	const [uptime24h, checks, openIncident, availability, availabilityOverview] = await Promise.all([
-		computeUptime24h(locals.pb!, record.id),
-		fetchRecentChecks(locals.pb!, record.id, 24),
-		getOpenIncidentForMonitor(locals.pb!, record.id),
-		getAvailabilityTable(locals.pb!, record.id),
-		getAvailabilityOverview(locals.pb!, record.id)
-	]);
+	const [uptime24h, checks, openIncident, availability, availabilityOverview, zones] =
+		await Promise.all([
+			computeUptime24h(locals.pb!, record.id),
+			fetchRecentChecks(locals.pb!, record.id, 24),
+			getOpenIncidentForMonitor(locals.pb!, record.id),
+			getAvailabilityTable(locals.pb!, record.id),
+			getAvailabilityOverview(locals.pb!, record.id),
+			// Names and order for the zones this page shows, as the form and the
+			// dashboard have them (#558).
+			getZones(locals.pb!)
+		]);
+	const zoneLabels: Record<string, ZoneLabel> = Object.fromEntries(
+		[...zones].map(([code, z]) => [code, { label: z.displayName, sortOrder: z.sortOrder }])
+	);
 
 	const monitor = new MonitorItem({ ...record, uptime24h });
 
@@ -34,6 +43,7 @@ export const load: PageServerLoad = async ({ locals, params }) => {
 		openIncident,
 		availability,
 		availabilityOverview,
+		zoneLabels,
 		checks: checks.map((c) => ({
 			checked_at: c.checked_at,
 			response_ms: c.response_ms,
@@ -45,6 +55,7 @@ export const load: PageServerLoad = async ({ locals, params }) => {
 			status_code: c.status_code,
 			zone: c.zone,
 			error: c.error,
+			inconclusive: !!c.inconclusive,
 			redirect_count: c.redirect_count ?? 0,
 			final_url: c.final_url ?? ''
 		}))

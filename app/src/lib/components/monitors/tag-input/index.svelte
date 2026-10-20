@@ -51,6 +51,7 @@
 		bind:value={draft}
 		onkeydown={onKeydown}
 		onblur={() => add(draft)}
+		aria-label="Tags"
 		placeholder={tags.length ? '' : 'prod, api, eu…'}
 	/>
 </div>

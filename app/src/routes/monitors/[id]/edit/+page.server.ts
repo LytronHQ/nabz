@@ -1,7 +1,7 @@
 import { error, redirect } from '@sveltejs/kit';
 import type { PageServerLoad } from './$types';
-import { MonitorItem } from '$lib/models/monitor';
-import { loadMonitorFormOptions } from '$lib/server/monitor-form';
+import { MonitorItem } from '#lib/models/monitor.js';
+import { loadMonitorFormOptions } from '#lib/server/monitor-form.js';
 
 export const load: PageServerLoad = async ({ locals, params }) => {
 	if (!locals.user) {

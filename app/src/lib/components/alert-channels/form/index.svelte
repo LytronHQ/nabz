@@ -1,23 +1,45 @@
 <script lang="ts">
-	import { AlertChannelTypes } from '$lib/models/alert-channel';
-	import { Select, Toggle } from '$lib/components/common';
+	import {
+		AlertChannelTypes,
+		type AlertChannelItem,
+		type AlertChannelNewItem,
+		type AlertChannelType,
+		type ChannelSettings
+	} from '#lib/models/alert-channel.js';
+	import { Select, Toggle } from '#lib/components/common/index.js';
+	import { channelTarget } from '#lib/utils/channel-display.js';
+	import { deviceName, preparePush, subscribe, type PushState } from '#lib/utils/push-subscribe.js';
 
 	interface Props {
-		data: any;
+		/** Undefined while the page's modal is closed: the page only sets its item
+		 *  when the modal opens, and the Modal renders this form only while open. */
+		data: AlertChannelNewItem | AlertChannelItem | undefined;
 		/** Per-field validation messages, keyed by field name (e.g. { url }, { botToken }). */
 		errors?: Record<string, string>;
 	}
 
 	let { data = $bindable(), errors = {} }: Props = $props();
+	// The same object as `data` (edits through it reach the page's $state), typed
+	// as set: this form is only ever rendered once the page has an item.
+	let item = $derived(data as AlertChannelNewItem | AlertChannelItem);
 
-	const types: { value: any; name: string }[] = AlertChannelTypes.map((t) => ({
-		name: t.charAt(0).toUpperCase() + t.slice(1),
+	const TYPE_NAMES: Partial<Record<AlertChannelType, string>> = {
+		pagerduty: 'PagerDuty',
+		push: 'Push notification'
+	};
+	const types: { value: AlertChannelType; name: string }[] = AlertChannelTypes.map((t) => ({
+		name: TYPE_NAMES[t] ?? t.charAt(0).toUpperCase() + t.slice(1),
 		value: t
 	}));
 
 	// `multiline` fields render as an auto-growing textarea so long values (webhook
 	// URLs especially) are visible in full rather than truncated in a one-line input.
-	type FieldDef = { key: string; label: string; placeholder: string; multiline?: boolean };
+	type FieldDef = {
+		key: keyof ChannelSettings;
+		label: string;
+		placeholder: string;
+		multiline?: boolean;
+	};
 
 	// Each type renders only its own settings; Telegram takes two fields.
 	const fieldsByType: Record<string, FieldDef[]> = {
@@ -59,7 +81,7 @@
 		]
 	};
 
-	let fields = $derived(fieldsByType[data.type] ?? []);
+	let fields = $derived(fieldsByType[item.type] ?? []);
 
 	// Grow a textarea to fit its content so the whole target is visible at a glance.
 	function autogrow(node: HTMLTextAreaElement) {
@@ -127,7 +149,7 @@
 			}
 		}
 	};
-	let help = $derived(helpByType[data.type]);
+	let help = $derived(helpByType[item.type]);
 
 	// One-click Telegram Chat ID detection (#124): with a bot token entered, ask our
 	// server to read the bot's recent updates and fill in the numeric Chat ID.
@@ -141,11 +163,11 @@
 			const res = await fetch('/api/alert-channels/detect-telegram-chat', {
 				method: 'POST',
 				headers: { 'content-type': 'application/json' },
-				body: JSON.stringify({ botToken: (data.botToken ?? '').trim() })
+				body: JSON.stringify({ botToken: (item.botToken ?? '').trim() })
 			});
 			const body = await res.json().catch(() => ({}));
 			if (res.ok && body.chatId) {
-				data.chatId = body.chatId;
+				item.chatId = body.chatId;
 				detectOk = true;
 				detectMsg = body.name ? `Found ${body.name}` : 'Chat ID detected';
 			} else {
@@ -158,6 +180,44 @@
 		}
 		detecting = false;
 	}
+
+	// Push (#602): the slow part (key + service worker) is prepared as soon as the
+	// type is picked, so the tap can call subscribe() with nothing to wait for.
+	let pushState = $state<PushState | null>(null);
+	let pushBusy = $state(false);
+	let pushMsg = $state('');
+	let pushOk = $state(false);
+	$effect(() => {
+		if (item.type !== 'push' || pushState) return;
+		preparePush()
+			.then((s) => (pushState = s))
+			.catch(() => (pushState = { kind: 'unsupported' }));
+	});
+	let subscribedTo = $derived(item.endpoint ? channelTarget(item) : '');
+
+	function turnOnPush() {
+		if (pushState?.kind !== 'ready') return;
+		pushBusy = true;
+		pushMsg = '';
+		// No await before this call: it must run inside the tap (see push-subscribe.ts).
+		subscribe(pushState)
+			.then((keys) => {
+				item.endpoint = keys.endpoint;
+				item.p256dh = keys.p256dh;
+				item.auth = keys.auth;
+				if (!item.name.trim()) item.name = deviceName();
+				pushOk = true;
+				pushMsg = 'This device is ready. Save to start getting alerts here.';
+			})
+			.catch((err: unknown) => {
+				pushOk = false;
+				pushMsg =
+					typeof Notification !== 'undefined' && Notification.permission === 'denied'
+						? 'Notifications are blocked for nabz. Allow them in this browser’s site settings, then try again.'
+						: `Could not turn on notifications: ${err instanceof Error ? err.message : String(err)}`;
+			})
+			.finally(() => (pushBusy = false));
+	}
 </script>
 
 <div class="grid grid-cols-12 gap-4">
@@ -165,7 +225,7 @@
 		<span class="form-lbl">Name <span class="opt">(optional)</span></span>
 		<input
 			class="form-input mt-1 block w-full"
-			bind:value={data.name}
+			bind:value={item.name}
 			placeholder="e.g. On-call Slack"
 		/>
 		<span class="hint-txt">Shown in escalation policies. Falls back to the target when empty.</span>
@@ -173,7 +233,7 @@
 
 	<div class="col-span-12 sm:col-span-4">
 		<span class="form-lbl">Type</span>
-		<Select class="mt-1" items={types} bind:value={data.type} />
+		<Select class="mt-1" label="Type" items={types} bind:value={item.type} />
 	</div>
 
 	<div class="col-span-12 sm:col-span-8 grid gap-4">
@@ -185,17 +245,17 @@
 						class="form-input mt-1 block w-full tgt-area"
 						rows="1"
 						use:autogrow
-						bind:value={data[f.key]}
+						bind:value={item[f.key]}
 						placeholder={f.placeholder}></textarea>
 				{:else if f.key === 'chatId'}
 					<div class="chatid-row">
-						<input class="form-input" bind:value={data.chatId} placeholder={f.placeholder} />
+						<input class="form-input" bind:value={item.chatId} placeholder={f.placeholder} />
 						<button
 							type="button"
 							class="btn btn-ghost detect-btn"
 							onclick={detectChatId}
-							disabled={!(data.botToken ?? '').trim() || detecting}
-							title={!(data.botToken ?? '').trim()
+							disabled={!(item.botToken ?? '').trim() || detecting}
+							title={!(item.botToken ?? '').trim()
 								? 'Enter the bot token first'
 								: 'Read the Chat ID from your bot’s recent messages'}
 						>
@@ -213,7 +273,7 @@
 				{:else}
 					<input
 						class="form-input mt-1 block w-full"
-						bind:value={data[f.key]}
+						bind:value={item[f.key]}
 						placeholder={f.placeholder}
 					/>
 				{/if}
@@ -221,11 +281,70 @@
 			</label>
 		{/each}
 
+		{#if item.type === 'push'}
+			<div class="push-box">
+				<span class="form-lbl">This device</span>
+				{#if subscribedTo}
+					<span class="push-current" data-testid="push-current">Subscribed: {subscribedTo}</span>
+				{/if}
+				{#if pushState === null}
+					<span class="push-note">Checking this browser…</span>
+				{:else if pushState.kind === 'ready'}
+					{#if !pushOk}
+						<button
+							type="button"
+							class="btn btn-primary push-btn"
+							onclick={turnOnPush}
+							disabled={pushBusy}
+						>
+							{pushBusy
+								? 'Waiting for permission…'
+								: subscribedTo
+									? 'Use this device instead'
+									: 'Turn on notifications on this device'}
+						</button>
+					{/if}
+					{#if pushMsg}
+						<span class="detect-msg" class:ok={pushOk}>{pushMsg}</span>
+					{:else}
+						<span class="push-note"
+							>Alerts arrive as notifications on the device you do this on. Add one channel per
+							device.</span
+						>
+					{/if}
+				{:else if pushState.kind === 'ios-home-screen'}
+					<span class="push-note"
+						>On iPhone and iPad, push alerts work only from the installed app: in Safari tap
+						<b>Share → Add to Home Screen</b>, open nabz from the Home Screen, and add this channel
+						there.</span
+					>
+				{:else if pushState.kind === 'blocked'}
+					<span class="push-note"
+						>Notifications are blocked for nabz in this browser. Allow them in the site settings,
+						then reopen this form.</span
+					>
+				{:else if pushState.kind === 'not-configured'}
+					<span class="push-note">Push alerts are not set up on this nabz server yet.</span>
+				{:else if pushState.kind === 'no-worker'}
+					<span class="push-note"
+						>nabz’s background worker is not running in this browser, so it cannot receive
+						notifications. Reload the page and try again; a private window may not allow it.</span
+					>
+				{:else}
+					<span class="push-note"
+						>This browser cannot receive push notifications. Try Chrome, Edge, Firefox or Safari.</span
+					>
+				{/if}
+				{#if errors.endpoint}<span class="field-err">{errors.endpoint}</span>{/if}
+			</div>
+		{/if}
+
 		{#if help}
 			<details class="ch-help">
 				<summary>{help.summary}</summary>
 				<ol>
 					{#each help.steps as step, i (i)}
+						<!-- eslint-disable-next-line svelte/no-at-html-tags -- trusted: `step` is a literal from the static helpByType table above, never user input -->
 						<li>{@html step}</li>
 					{/each}
 				</ol>
@@ -240,11 +359,29 @@
 	</div>
 
 	<div class="col-span-12">
-		<Toggle bind:checked={data.enabled}>Enabled</Toggle>
+		<Toggle bind:checked={item.enabled}>Enabled</Toggle>
 	</div>
 </div>
 
 <style>
+	.push-box {
+		display: grid;
+		gap: 6px;
+		align-content: start;
+	}
+	.push-btn {
+		justify-self: start;
+		margin-top: 2px;
+	}
+	.push-note,
+	.push-current {
+		font-size: 12.5px;
+		color: var(--ink-3);
+		line-height: 1.5;
+	}
+	.push-current {
+		color: var(--ink-2);
+	}
 	.opt {
 		font-weight: 400;
 		color: var(--ink-3);

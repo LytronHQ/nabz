@@ -2,7 +2,7 @@
 #
 # external-watch.sh — configure the outside-in monitoring: Better Stack watching
 # the public endpoints, and a Better Stack heartbeat as the evaluator's
-# dead-man's switch. Same shape as cloudflare/tunnel.sh — plain curl + jq,
+# dead-man's switch. Same shape as cloudflare/edge.sh — plain curl + jq,
 # idempotent.
 #
 #   ./deploy/external-watch.sh production
@@ -84,8 +84,11 @@ existing="$(bs GET "?per_page=50")"
 upsert_monitor() { # name url json-extra
   local name="$1" url="$2" extra="$3" id body
   id="$(jq -r --arg u "$url" '.data[] | select(.attributes.url == $u) | .id' <<<"$existing" | head -1)"
+  # paused:false on every run: the production health and PocketBase monitors were
+  # paused before launch, and an upsert that never set it left them off through
+  # #520 and #588 while reporting "updated" (#593).
   body="$(jq -nc --arg n "$name" --arg u "$url" --argjson f "$CHECK_FREQUENCY" --argjson x "$extra" \
-    '{pronounceable_name:$n, url:$u, check_frequency:$f, email:false, sms:false, call:false} + $x')"
+    '{pronounceable_name:$n, url:$u, check_frequency:$f, email:false, sms:false, call:false, paused:false} + $x')"
   if [ -n "$id" ]; then
     bs PATCH "/$id" "$body" >/dev/null
     echo "   updated  $name"
@@ -250,7 +253,7 @@ echo "==> Better Stack heartbeat (evaluator dead-man's switch)"
 HB_NAME="nabz-evaluator (${ENV_NAME})"
 hbs="$(curl -sS "$BS_HB" -H "Authorization: Bearer $BETTERSTACK_API_TOKEN")"
 hb_id="$(jq -r --arg n "$HB_NAME" '.data[] | select(.attributes.name == $n) | .id' <<<"$hbs" | head -1)"
-hb_body="$(jq -nc --arg n "$HB_NAME" '{name:$n, period:300, grace:300}')"
+hb_body="$(jq -nc --arg n "$HB_NAME" '{name:$n, period:300, grace:300, paused:false}')"
 if [ -n "$hb_id" ]; then
   hb="$(curl -sS -X PATCH "$BS_HB/$hb_id" -H "Authorization: Bearer $BETTERSTACK_API_TOKEN" \
     -H 'Content-Type: application/json' -d "$hb_body")"
@@ -276,7 +279,7 @@ MHB_NAME="nabz-pb-maintenance (${ENV_NAME})"
 mhb_id="$(jq -r --arg n "$MHB_NAME" '.data[] | select(.attributes.name == $n) | .id' <<<"$hbs" | head -1)"
 # Daily, with a wide grace: one missed night is a hiccup, two is a real problem,
 # and paging at 03:20 for a run that will succeed at 03:17 tomorrow is noise.
-mhb_body="$(jq -nc --arg n "$MHB_NAME" '{name:$n, period:86400, grace:21600}')"
+mhb_body="$(jq -nc --arg n "$MHB_NAME" '{name:$n, period:86400, grace:21600, paused:false}')"
 if [ -n "$mhb_id" ]; then
   mhb="$(curl -sS -X PATCH "$BS_HB/$mhb_id" -H "Authorization: Bearer $BETTERSTACK_API_TOKEN" \
     -H 'Content-Type: application/json' -d "$mhb_body")"

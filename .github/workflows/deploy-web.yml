@@ -38,10 +38,15 @@ jobs:
         run: npm run build:cf
         working-directory: app
 
+      # CF_WORKERS_API_TOKEN is a Workers-scoped token ("Edit Cloudflare Workers"):
+      # Workers Scripts and Workers Routes, which a custom-domain deploy needs.
+      # CF_API_TOKEN is the tunnel/Access token and may not carry Workers Routes —
+      # production's first deploy failed on exactly that (#510). Falls back to it
+      # so an environment without the Workers token deploys as before.
       - name: Deploy
         working-directory: app
         env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_WORKERS_API_TOKEN || secrets.CF_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
           WRANGLER_ENV: ${{ vars.WRANGLER_ENV }}
         run: |
@@ -55,7 +60,7 @@ jobs:
       - name: Push secrets
         working-directory: app
         env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_WORKERS_API_TOKEN || secrets.CF_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
           WRANGLER_ENV: ${{ vars.WRANGLER_ENV }}
           PKCE_FLOW_ENCRYPTION_KEY: ${{ secrets.PKCE_FLOW_ENCRYPTION_KEY }}
@@ -65,6 +70,9 @@ jobs:
           ADMIN_EMAILS: ${{ vars.ADMIN_EMAILS }}
           CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
           CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+          # Minted by bootstrap-vapid (#602). Optional: empty, the channel form
+          # says push is not set up rather than failing.
+          VAPID_PUBLIC_KEY: ${{ secrets.VAPID_PUBLIC_KEY }}
         run: |
           set -euo pipefail
           for req in CF_ACCESS_CLIENT_ID CF_ACCESS_CLIENT_SECRET WEB_PB_PASSWORD; do
@@ -76,9 +84,11 @@ jobs:
             --arg pkce "$PKCE_FLOW_ENCRYPTION_KEY" --arg u "$WEB_PB_USERNAME" \
             --arg p "$WEB_PB_PASSWORD" --arg h "$HEALTH_DEBUG_TOKEN" \
             --arg a "$ADMIN_EMAILS" --arg ci "$CF_ACCESS_CLIENT_ID" --arg cs "$CF_ACCESS_CLIENT_SECRET" \
+            --arg vp "$VAPID_PUBLIC_KEY" \
             '{PKCE_FLOW_ENCRYPTION_KEY:$pkce, WEB_PB_USERNAME:$u, WEB_PB_PASSWORD:$p,
               HEALTH_DEBUG_TOKEN:$h, ADMIN_EMAILS:$a,
-              CF_ACCESS_CLIENT_ID:$ci, CF_ACCESS_CLIENT_SECRET:$cs}' \
+              CF_ACCESS_CLIENT_ID:$ci, CF_ACCESS_CLIENT_SECRET:$cs,
+              VAPID_PUBLIC_KEY:$vp}' \
             | if [ -n "${WRANGLER_ENV:-}" ]; then npx --yes wrangler secret bulk --env "$WRANGLER_ENV"; else npx --yes wrangler secret bulk; fi
 
       - name: Access must be in the path

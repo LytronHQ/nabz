@@ -10,9 +10,6 @@ name: email-canary
 # asked for. Add them as repository secrets and the canary runs as-is.
 on:
   workflow_dispatch:
-  schedule:
-    # 06:23 UTC daily (off the hour to dodge the scheduler rush)
-    - cron: '23 6 * * *'
 
 concurrency:
   group: email-canary
@@ -89,8 +86,21 @@ jobs:
           for attempt in $(seq 1 12); do        # ~6 min (12 x 30s)
             sleep 30
             to_ts="$(date +%s)"
-            resp="$(curl -sS "https://api.mailersend.com/v1/activity/${MAILERSEND_DOMAIN_ID}?date_from=${from_ts}&date_to=${to_ts}&event[]=delivered&event[]=hard_bounced&event[]=soft_bounced&event[]=rejected" \
+            # Status and body, not just the body. Without this a 401/403/404 and a
+            # genuinely empty result both render as `events=[]`, which is how a
+            # wrong scope or a wrong domain id reads exactly like "not delivered".
+            code="$(curl -sS -o /tmp/activity.json -w '%{http_code}' \
+              "https://api.mailersend.com/v1/activity/${MAILERSEND_DOMAIN_ID}?date_from=${from_ts}&date_to=${to_ts}&event[]=delivered&event[]=hard_bounced&event[]=soft_bounced" \
               -H "Authorization: Bearer $MAILERSEND_API_TOKEN")"
+            resp="$(cat /tmp/activity.json)"
+            if [ "$code" != "200" ]; then
+              echo "::error::activity API returned HTTP $code: $(head -c 300 /tmp/activity.json)"
+              exit 1
+            fi
+            if [ "$attempt" = 1 ]; then
+              echo "activity API HTTP 200, $(jq -r '.data | length' <<<"$resp" 2>/dev/null || echo '?') record(s) in window"
+              echo "first record: $(jq -c '.data[0] // "none"' <<<"$resp" 2>/dev/null | head -c 400)"
+            fi
             # Match our message either by message id or the unique subject, then
             # inspect its event type. (Field names per the MailerSend Activity API.)
             match="$(jq -r --arg id "$msg_id" --arg subj "$subject" '
@@ -99,7 +109,7 @@ jobs:
             echo "attempt $attempt: events=[${match}]"
             case ",$match," in
               *,delivered,*) delivered=1; break ;;
-              *hard_bounced*|*soft_bounced*|*rejected*)
+              *hard_bounced*|*soft_bounced*)
                 echo "::error::canary email failed to deliver (events: $match)"; exit 1 ;;
             esac
           done

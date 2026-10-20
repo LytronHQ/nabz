@@ -1,19 +1,32 @@
 import { test, expect } from 'vitest';
 import { load } from './+page.server';
 
+// The fakes stub only what load touches, so the event is a deliberate partial.
+type LoadEvent = Parameters<typeof load>[0];
+type LoadData = Exclude<Awaited<ReturnType<typeof load>>, void>;
+const run = async (event: object) => (await load(event as LoadEvent)) as LoadData;
+
+type FakeList = {
+	items: object[];
+	page: number;
+	perPage: number;
+	totalItems: number;
+	totalPages?: number;
+};
+
 // The load makes up to three getList calls: the paged list (perPage = DefaultPageSize),
 // a perPage:1 open-count (filter resolved_at=""), and — only when a filter is active —
 // a perPage:1 global-total (no filter). Distinguish them by perPage + filter.
 function fakeLocals(
-	user: any,
-	opts: { mainList?: any; openTotal?: number; grandTotal?: number } = {}
+	user: { id: string } | null,
+	opts: { mainList?: FakeList; openTotal?: number; grandTotal?: number } = {}
 ) {
 	const { mainList, openTotal = 0, grandTotal = 0 } = opts;
 	return {
 		user,
 		pb: {
 			collection: () => ({
-				getList: async (_page: number, perPage: number, o?: any) => {
+				getList: async (_page: number, perPage: number, o?: { filter?: string }) => {
 					if (perPage === 1 && o?.filter === 'resolved_at = ""')
 						return { items: [], page: 1, perPage: 1, totalItems: openTotal, totalPages: 1 };
 					if (perPage === 1)
@@ -41,10 +54,10 @@ test('load returns the requested page, pagination metadata, and global counts', 
 		perPage: 10,
 		totalItems: 25
 	};
-	const res: any = await load({
+	const res = await run({
 		locals: fakeLocals({ id: 'u1' }, { mainList, openTotal: 4 }),
 		url: new URL('http://x/incidents?page=2')
-	} as any);
+	});
 
 	expect(res.incidents).toHaveLength(1);
 	expect(res.incidents[0].monitor).toBe('Alpha');
@@ -57,10 +70,10 @@ test('load returns the requested page, pagination metadata, and global counts', 
 
 test('a filtered view reports the global total (not the filtered count)', async () => {
 	const mainList = { items: [], page: 1, perPage: 10, totalItems: 3, totalPages: 1 }; // 3 resolved
-	const res: any = await load({
+	const res = await run({
 		locals: fakeLocals({ id: 'u1' }, { mainList, openTotal: 12, grandTotal: 15 }),
 		url: new URL('http://x/incidents?filter=resolved')
-	} as any);
+	});
 	expect(res.filter).toBe('resolved');
 	expect(res.pagination.totalItems).toBe(3); // filtered (drives the pager)
 	expect(res.openCount).toBe(12);
@@ -68,15 +81,15 @@ test('a filtered view reports the global total (not the filtered count)', async 
 });
 
 test('an unknown filter falls back to all', async () => {
-	const res: any = await load({
+	const res = await run({
 		locals: fakeLocals({ id: 'u1' }),
 		url: new URL('http://x/incidents?filter=nope')
-	} as any);
+	});
 	expect(res.filter).toBe('all');
 });
 
 test('load redirects to /signin when not authenticated', async () => {
 	await expect(
-		load({ locals: fakeLocals(null), url: new URL('http://x/incidents') } as any)
+		run({ locals: fakeLocals(null), url: new URL('http://x/incidents') })
 	).rejects.toMatchObject({ status: 303, location: '/signin' });
 });

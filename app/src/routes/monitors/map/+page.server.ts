@@ -1,7 +1,7 @@
 import { redirect } from '@sveltejs/kit';
 import type { PageServerLoad } from './$types';
-import { registrableDomain } from '$lib/utils/domain';
-import { computeUptime24h } from '$lib/server/checks';
+import { registrableDomain } from '#lib/utils/domain.js';
+import { computeUptime24h } from '#lib/server/checks.js';
 
 // The Monitor map (#222, refined in #280): all of the user's monitors, reduced to
 // what the graph needs — status (node colour), tags and registrable domain (the two
@@ -20,7 +20,7 @@ export const load: PageServerLoad = async ({ locals }) => {
 	// One uptime query per monitor (an N+1, same pattern as the list). The map loads
 	// the whole fleet, so this grows with it — acceptable for typical sizes.
 	const monitors = await Promise.all(
-		rows.map(async (m: any) => ({
+		rows.map(async (m) => ({
 			id: m.id as string,
 			name: (m.name as string) ?? '',
 			// A disabled monitor isn't scheduled, so its stored status goes stale —

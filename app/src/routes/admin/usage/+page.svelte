@@ -1,14 +1,14 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
-	import { invalidateAll } from '$app/navigation';
-	import { usePoll } from '$lib/utils/use-poll';
-	import { Meta, PageHeader, Pill, Sparkline } from '$lib/components/common';
-	import { formatDuration, formatRelativeTime } from '$lib/utils/format-utils';
+	import { refreshAll } from '$app/navigation';
+	import { usePoll } from '#lib/utils/use-poll.js';
+	import { Meta, PageHeader, Pill, Sparkline } from '#lib/components/common/index.js';
+	import { formatDuration, formatRelativeTime } from '#lib/utils/format-utils.js';
 
 	let { data } = $props();
 	let u = $derived(data.usage);
 	let fleet = $derived(data.fleet ?? []);
-	let checksSeries = $derived(u.activity.checksPerDay.map((d: any) => d.checks));
+	let checksSeries = $derived(u.activity.checksPerDay.map((d) => d.checks));
 	let latestChecks = $derived(checksSeries.at(-1) ?? 0);
 	let channelTypes = $derived(Object.entries(u.alerting.channelsByType) as [string, number][]);
 
@@ -22,7 +22,7 @@
 
 	// The aggregate is cached ~60s server-side; poll re-pulls it and the fresh
 	// fleet heartbeats.
-	usePoll(() => invalidateAll(), 15000);
+	usePoll(() => refreshAll(), 15000);
 </script>
 
 <Meta title="Usage · Admin" />
@@ -97,13 +97,15 @@
 		<div class="card stat emphasis">
 			<div class="label">Checks · latest day</div>
 			<div class="value">{latestChecks}</div>
-			<div class="spark">
-				{#if checksSeries.length > 1}<Sparkline
-						data={checksSeries}
-						tone="accent"
-						width={160}
-					/>{:else}<span class="delta mut">not enough history yet</span>{/if}
-			</div>
+			<!-- The note is a normal caption, not inside .spark: that box is absolutely
+			     positioned for the sparkline, so the text wrapped over the number. -->
+			{#if checksSeries.length > 1}
+				<div class="spark">
+					<Sparkline data={checksSeries} tone="current" width={160} />
+				</div>
+			{:else}
+				<div class="delta mut">not enough history yet</div>
+			{/if}
 		</div>
 		<div class="card stat">
 			<div class="label">Incidents · total</div>
@@ -160,10 +162,8 @@
 			<table class="data-table">
 				<thead>
 					<tr
-						><th>Node</th><th class="r">Workers</th><th class="r">Queue</th><th class="r">Lag</th><th
-							>Leader</th
-						><th class="r">Heartbeat</th
-						><th>Health</th></tr
+						><th>Node</th><th class="r">Workers</th><th class="r">Queue</th><th class="r">Lag</th
+						><th>Leader</th><th class="r">Heartbeat</th><th>Health</th></tr
 					>
 				</thead>
 				<tbody>

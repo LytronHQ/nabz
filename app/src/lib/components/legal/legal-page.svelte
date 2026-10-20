@@ -3,16 +3,16 @@
 	// Shared shell for the standalone legal pages (/privacy, /terms). Self-contained
 	// and theme-aware (like the changelog page), in the Blueprint aesthetic: petrol
 	// brand, hairline rules, no shadows, Inter. The content goes in the default slot.
-	import { Meta } from '$lib/components/common';
+	import { Meta, ThemeToggle } from '#lib/components/common/index.js';
 
 	interface Props {
 		title: string;
 		lastUpdated: string; // ISO date, shown in the header
-		draft?: boolean; // these are drafts pending review — banner on by default
+		draft?: boolean; // published by default; set for a revision still under review (#554)
 		children?: import('svelte').Snippet;
 	}
 
-	let { title, lastUpdated, draft = true, children }: Props = $props();
+	let { title, lastUpdated, draft = false, children }: Props = $props();
 </script>
 
 <Meta title={`${title} — nabz`} />
@@ -33,7 +33,10 @@
 				</span>
 				<b>nabz</b>
 			</a>
-			<a class="legal-back" href={resolve('/')}>← Back</a>
+			<span class="legal-nav-end">
+				<a class="legal-back" href={resolve('/')}>← Back</a>
+				<ThemeToggle />
+			</span>
 		</header>
 
 		{#if draft}
@@ -55,8 +58,8 @@
 <style>
 	.legal-page {
 		/* Self-contained palette so the page renders correctly outside the app
-		   shell; theme-aware via prefers-color-scheme. Petrol brand per the
-		   Blueprint design system. */
+		   shell; theme-aware: the OS setting unless a theme is saved (data-theme), like
+		   the app (#556). Petrol brand per the Blueprint design system. */
 		--ground: #ffffff;
 		--ink: #16211f;
 		--ink-2: #4a5754;
@@ -76,7 +79,7 @@
 		line-height: 1.6;
 	}
 	@media (prefers-color-scheme: dark) {
-		.legal-page {
+		:global(:root:not([data-theme='light'])) .legal-page {
 			--ground: #0e1615;
 			--ink: #e7ecea;
 			--ink-2: #9aa8a4;
@@ -85,6 +88,15 @@
 			--brand-ink: #0e1615;
 			--wash: #141d1c;
 		}
+	}
+	:global(:root[data-theme='dark']) .legal-page {
+		--ground: #0e1615;
+		--ink: #e7ecea;
+		--ink-2: #9aa8a4;
+		--rule: #253230;
+		--brand: #7fb2b0;
+		--brand-ink: #0e1615;
+		--wash: #141d1c;
 	}
 
 	.legal {
@@ -121,6 +133,11 @@
 	.legal-mark svg {
 		width: 1.1rem;
 		height: 1.1rem;
+	}
+	.legal-nav-end {
+		display: inline-flex;
+		align-items: center;
+		gap: 16px;
 	}
 	.legal-back {
 		color: var(--ink-2);

@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-// Shared retry timing for startup dependency connects (PocketBase, Valkey).
+// Shared retry timing for startup dependency connects (PocketBase).
 const (
 	RetryBaseDelay = 2 * time.Second
 	RetryMaxDelay  = 60 * time.Second

@@ -2,7 +2,19 @@ import { describe, test, expect, vi, beforeEach } from 'vitest';
 
 // Mutable so each test can set the Access token (or not) before importing.
 const mockEnv: Record<string, string | undefined> = {};
-vi.mock('$env/dynamic/private', () => ({ env: mockEnv }));
+// Getters, not values: the module reads these per call, and each test sets its
+// own mockEnv before importing (unset reads as '', like the real module).
+vi.mock('$app/env/private', () => ({
+	get PB_URL() {
+		return mockEnv.PB_URL ?? '';
+	},
+	get CF_ACCESS_CLIENT_ID() {
+		return mockEnv.CF_ACCESS_CLIENT_ID ?? '';
+	},
+	get CF_ACCESS_CLIENT_SECRET() {
+		return mockEnv.CF_ACCESS_CLIENT_SECRET ?? '';
+	}
+}));
 
 const { accessHeaders, createPocketBase } = await import('./pb-client');
 

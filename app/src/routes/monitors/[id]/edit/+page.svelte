@@ -1,8 +1,8 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
-	import { Meta } from '$lib/components/common';
-	import { MonitorFormPage } from '$lib/components/monitors';
-	import { MonitorItem } from '$lib/models/monitor';
+	import { Meta } from '#lib/components/common/index.js';
+	import { MonitorFormPage } from '#lib/components/monitors/index.js';
+	import { MonitorItem } from '#lib/models/monitor.js';
 
 	let { data } = $props();
 	// Derived, not captured: SvelteKit reuses this component when navigating from
@@ -13,11 +13,15 @@
 
 <Meta title={`Edit ${data.monitor.name}`} />
 
-<MonitorFormPage
-	{item}
-	availableZones={data.availableZones}
-	availablePolicies={data.availablePolicies}
-	title={`Edit ${data.monitor.name}`}
-	submitText="Save changes"
-	backHref={resolve('/monitors/[id]', { id: data.monitor.id! })}
-/>
+<!-- Keyed: MonitorFormPage takes its editable copy of `item` once, at mount, so a
+     navigation to another monitor's edit page must remount it. -->
+{#key data.monitor.id}
+	<MonitorFormPage
+		{item}
+		availableZones={data.availableZones}
+		availablePolicies={data.availablePolicies}
+		title={`Edit ${data.monitor.name}`}
+		submitText="Save changes"
+		backHref={resolve('/monitors/[id]', { id: data.monitor.id! })}
+	/>
+{/key}

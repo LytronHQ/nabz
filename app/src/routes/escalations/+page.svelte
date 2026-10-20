@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
-	import { invalidateAll, goto } from '$app/navigation';
+	import { refreshAll, goto } from '$app/navigation';
 	import {
 		Meta,
 		Modal,
@@ -8,18 +8,18 @@
 		Pagination,
 		AddButton,
 		EmptyState
-	} from '$lib/components/common';
-	import { PaginationData } from '$lib/models';
-	import { pushToast } from '$lib/stores/toast-store';
+	} from '#lib/components/common/index.js';
+	import { PaginationData } from '#lib/models/index.js';
+	import { pushToast } from '#lib/stores/toast-store.js';
 
 	let { data } = $props();
 
 	let policies = $derived(data.policies ?? []);
 	let channels = $derived((data.channels ?? []).filter((c) => c.enabled));
-	let pagination = $derived(new PaginationData(data.pagination as any));
+	let pagination = $derived(new PaginationData(data.pagination));
 	function onPage(detail: { page: number }) {
 		// eslint-disable-next-line svelte/no-navigation-without-resolve -- the path is resolve()d inside this template literal
-		goto(`${resolve('/escalations')}?page=${detail.page}`, { noScroll: true });
+		goto(`${resolve('escalations')}?page=${detail.page}`, { reset: false });
 	}
 
 	let modal: Modal | undefined = $state();
@@ -75,7 +75,7 @@
 				body: JSON.stringify({ name: name.trim(), steps })
 			});
 			if (res.ok) {
-				await invalidateAll();
+				await refreshAll();
 				pushToast('success', editId ? 'Policy updated' : 'Policy created');
 				return true;
 			}
@@ -91,7 +91,7 @@
 	async function remove(p: (typeof policies)[number]) {
 		if (!confirm(`Delete policy "${p.name}"?`)) return;
 		const res = await fetch(`/api/escalation-policies/${p.id}`, { method: 'DELETE' });
-		await invalidateAll();
+		await refreshAll();
 		pushToast(
 			res.ok ? 'success' : 'error',
 			res.ok ? 'Policy deleted' : "Couldn't delete the policy"

@@ -1,13 +1,17 @@
-import { json, type RequestHandler } from '@sveltejs/kit';
-import { DependencyItem, DependencyItemValidator, DependencyNewItem } from '$lib/models/dependency';
-import { failIfNoResponse, failIfNoUser } from '$lib/utils/api-utils';
-import { DefaultPageSize } from '$lib/constants';
-import { getApiErrors } from '$lib/utils/action-utils';
-import { wouldCycle } from '$lib/utils/dependency-graph';
-import ApiError from '$lib/models/api-error';
+import type { RequestHandler } from '@sveltejs/kit';
+import {
+	DependencyItem,
+	DependencyItemValidator,
+	DependencyNewItem
+} from '#lib/models/dependency.js';
+import { failIfNoResponse, failIfNoUser } from '#lib/utils/api-utils.js';
+import { DefaultPageSize } from '#lib/constants.js';
+import { getApiErrors } from '#lib/utils/action-utils.js';
+import { wouldCycle } from '#lib/utils/dependency-graph.js';
+import ApiError from '#lib/models/api-error.js';
 
 function badRequest(message: string, field: string): Response {
-	return json(new ApiError(false, message, 400, [{ field, message }]), { status: 400 });
+	return Response.json(new ApiError(false, message, 400, [{ field, message }]), { status: 400 });
 }
 
 export const GET: RequestHandler = async ({ locals, url }) => {
@@ -26,9 +30,12 @@ export const GET: RequestHandler = async ({ locals, url }) => {
 		});
 
 		const result = failIfNoResponse(response);
-		return json({ ...result, items: result.items.map((item: any) => new DependencyItem(item)) });
+		return Response.json({
+			...result,
+			items: result.items.map((item) => new DependencyItem(item))
+		});
 	} catch (err) {
-		return json(getApiErrors(err, 'Error getting dependencies'), { status: 500 });
+		return Response.json(getApiErrors(err, 'Error getting dependencies'), { status: 500 });
 	}
 };
 
@@ -48,7 +55,7 @@ export const POST: RequestHandler = async ({ locals, request }) => {
 			filter: `user="${locals.user?.id}"`,
 			fields: 'from,to'
 		});
-		const edges = (existing ?? []).map((r: any) => ({
+		const edges = (existing ?? []).map((r) => ({
 			from: r.from as string,
 			to: r.to as string
 		}));
@@ -74,8 +81,8 @@ export const POST: RequestHandler = async ({ locals, request }) => {
 		const expanded = await locals.pb?.collection('dependencies').getOne(record.id, {
 			expand: 'from,to'
 		});
-		return json(new DependencyItem(expanded ?? record), { status: 201 });
+		return Response.json(new DependencyItem(expanded ?? record), { status: 201 });
 	} catch (err) {
-		return json(getApiErrors(err, 'Error creating dependency'), { status: 500 });
+		return Response.json(getApiErrors(err, 'Error creating dependency'), { status: 500 });
 	}
 };

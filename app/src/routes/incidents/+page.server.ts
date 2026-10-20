@@ -1,6 +1,8 @@
 import { redirect } from '@sveltejs/kit';
 import type { PageServerLoad } from './$types';
-import { DefaultPageSize } from '$lib/constants';
+import { DefaultPageSize } from '#lib/constants.js';
+import { getZoneLabels } from '#lib/server/zones.js';
+import { nameZonesInText } from '#lib/utils/zone-order.js';
 
 // Open/resolved filter expressed against PocketBase (composes with pagination so a
 // filtered list isn't limited to one page). Collection list rules already scope
@@ -29,13 +31,14 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 			? res.totalItems
 			: (await locals.pb!.collection('incidents').getList(1, 1, {})).totalItems;
 
+	const labels = await getZoneLabels(locals.pb!);
 	const incidents = res.items.map((i) => ({
 		id: i.id,
 		monitorId: i.monitor,
 		monitor: i.expand?.monitor?.name ?? '(deleted monitor)',
 		started_at: i.started_at,
 		resolved_at: i.resolved_at,
-		cause: i.cause
+		cause: nameZonesInText(i.cause ?? '', labels)
 	}));
 
 	return {

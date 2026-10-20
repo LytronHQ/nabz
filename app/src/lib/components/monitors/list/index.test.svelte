@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { MonitorItem } from '$lib/models/monitor';
+	import type { MonitorItem } from '#lib/models/monitor.js';
 	import { List } from '../';
 
 	const data = [

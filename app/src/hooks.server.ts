@@ -1,9 +1,10 @@
-import { redirect, type Handle } from '@sveltejs/kit';
-import { dev } from '$app/environment';
-import { env } from '$env/dynamic/private';
-import { readAnonToken } from '$lib/server/anon';
-import { cookieSecure } from '$lib/server/cookie-secure';
-import { createPocketBase } from '$lib/server/pb-client';
+import { redirect } from '@sveltejs/kit';
+import type { Handle } from '@sveltejs/kit/hooks';
+import { dev } from '$app/env';
+import { COOKIE_SECURE } from '$app/env/private';
+import { readAnonToken } from '#lib/server/anon.js';
+import { cookieSecure } from '#lib/server/cookie-secure.js';
+import { createPocketBase } from '#lib/server/pb-client.js';
 
 /** Where a user with `must_change_password` is sent. */
 const FORCED_CHANGE_PATH = '/change-password';
@@ -37,9 +38,9 @@ export function isPasswordChangeExempt(pathname: string): boolean {
 
 export const handle: Handle = async ({ event, resolve }) => {
 	// Carries the Cloudflare Access service token and disables auto-cancellation
-	// (see $lib/server/pb-client).
+	// (see #lib/server/pb-client).
 	event.locals.pb = createPocketBase();
-	event.locals.getPocketBaseFileUrl = (record: any, fileName: any) =>
+	event.locals.getPocketBaseFileUrl = (record, fileName) =>
 		event.locals.pb?.files.getURL(record, fileName);
 
 	event.locals.pb.authStore.loadFromCookie(event.request.headers.get('cookie') || '');
@@ -58,7 +59,7 @@ export const handle: Handle = async ({ event, resolve }) => {
 
 			event.locals.user = user;
 		}
-	} catch (err) {
+	} catch {
 		event.locals.pb.authStore.clear();
 	}
 
@@ -84,7 +85,7 @@ export const handle: Handle = async ({ event, resolve }) => {
 	// every sign-in look like a rejected password. Falls back to `!dev` wherever
 	// COOKIE_SECURE is unset, so nothing changes for environments that have not set
 	// it.
-	const isProd = cookieSecure(env.COOKIE_SECURE, dev);
+	const isProd = cookieSecure(COOKIE_SECURE, dev);
 	// append, not set: replacing would clobber any cookie an endpoint set during
 	// resolve (e.g. the anon_session cookie from /api/anon/monitors).
 	response.headers.append(

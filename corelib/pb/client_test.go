@@ -205,17 +205,7 @@ func TestGetChecksSincePaginates(t *testing.T) {
 // when the auth collection is unset. It returns an error before any network call,
 // so a misconfigured node fails loudly instead of running with superuser rights.
 func TestNewClientRejectsEmptyAuthCollection(t *testing.T) {
-	var config models.Config
-	config.PB = &struct {
-		URL   string `yaml:"url"`
-		Admin struct {
-			Collection string `yaml:"collection"`
-			Username   string `yaml:"username"`
-			Password   string `yaml:"password"`
-			Token      string `yaml:"token"`
-		} `yaml:"admin"`
-	}{}
-	config.PB.URL = "http://127.0.0.1:1" // never dialled: the guard returns first
+	config := pbConfig("http://127.0.0.1:1") // never dialled: the guard returns first
 	config.PB.Admin.Collection = ""
 	config.PB.Admin.Username = "someone@svc.local"
 	config.PB.Admin.Password = "pw"
@@ -227,4 +217,26 @@ func TestNewClientRejectsEmptyAuthCollection(t *testing.T) {
 	if !strings.Contains(err.Error(), "auth collection is not set") {
 		t.Fatalf("unexpected error: %v", err)
 	}
+}
+
+// pbConfig builds the anonymous PB struct models.Config declares inline. Spelling
+// that literal out at each call site means adding one field breaks every test
+// that constructs a config; this keeps the blast radius at one function.
+func pbConfig(url string) models.Config {
+	var config models.Config
+	config.PB = &struct {
+		URL    string `yaml:"url"`
+		Access struct {
+			ClientId     string `yaml:"client_id"`
+			ClientSecret string `yaml:"client_secret"`
+		} `yaml:"access"`
+		Admin struct {
+			Collection string `yaml:"collection"`
+			Username   string `yaml:"username"`
+			Password   string `yaml:"password"`
+			Token      string `yaml:"token"`
+		} `yaml:"admin"`
+	}{}
+	config.PB.URL = url
+	return config
 }

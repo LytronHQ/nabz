@@ -137,6 +137,16 @@
 	--space-5: 20px;
 	--space-6: 24px;
 	--font-stat: 'Space Grotesk', 'InterVariable', system-ui, -apple-system, sans-serif;
+}
+
+/* Declared on every scope that sets a palette, not only :root: a custom property
+   whose value is var(...) resolves where it is declared and is inherited already
+   resolved, so aliases declared only on :root kept the LIGHT values inside a
+   .theme-dark wrapper (landing and changelog rendered light, code chips dark on
+   dark). Re-declaring them here makes them resolve against the local palette. */
+:root,
+.theme-light,
+.theme-dark {
 	/* Derived so they follow the picked accent (theme-tuned via --brand/surface/text). */
 	--brand-muted: color-mix(in srgb, var(--brand) 55%, var(--text-muted));
 	--brand-wash: color-mix(in srgb, var(--brand) 11%, var(--surface-1));
@@ -383,6 +393,65 @@
 		overflow-y: auto;
 	}
 
+	/* ---- installed app without the browser's title bar ----
+	   manifest display_override: window-controls-overlay. The browser draws only
+	   the window buttons, over the top strip; the env(titlebar-area-*) values say
+	   where the rest of that strip is, and the page moves down by its height. The
+	   33px fallbacks only matter where the mode applies but the values do not. */
+	.app-titlebar {
+		display: none;
+	}
+	@media (display-mode: window-controls-overlay) {
+		.app-titlebar {
+			display: flex;
+			align-items: center;
+			gap: 8px;
+			position: fixed;
+			top: 0;
+			left: 0;
+			right: 0;
+			height: env(titlebar-area-height, 33px);
+			/* Clear of the window buttons where they sit on the left (macOS). */
+			padding-left: calc(env(titlebar-area-x, 0px) + 12px);
+			background: var(--surface);
+			border-bottom: 1px solid var(--border);
+			font-size: 12.5px;
+			color: var(--ink-2);
+			user-select: none;
+			z-index: 70;
+			-webkit-app-region: drag;
+			app-region: drag;
+		}
+		.app-titlebar .mark {
+			width: 18px;
+			height: 18px;
+			flex: 0 0 18px;
+			border-radius: 5px;
+			background: linear-gradient(150deg, var(--accent), var(--accent-strong));
+			display: grid;
+			place-items: center;
+		}
+		.app-titlebar .mark svg {
+			width: 12px;
+			height: 12px;
+		}
+		body {
+			padding-top: env(titlebar-area-height, 33px);
+		}
+		.app-shell {
+			height: calc(100vh - env(titlebar-area-height, 33px));
+		}
+		/* Narrow window: the sticky top bar and the drawer start below the strip.
+		   The extra .app-shell keeps these ahead of the narrow-screen rules below. */
+		.app-shell .app-topbar {
+			top: env(titlebar-area-height, 33px);
+		}
+		.app-shell .side {
+			top: env(titlebar-area-height, 33px);
+			height: calc(100dvh - env(titlebar-area-height, 33px));
+		}
+	}
+
 	/* Mobile top bar + drawer backdrop: hidden on desktop, shown below the breakpoint. */
 	.app-topbar {
 		display: none;
@@ -485,7 +554,9 @@
 		text-decoration: none;
 		color: var(--ink);
 	}
-	.brand .mark {
+	/* .auth-brand too: the sign-in/sign-up mark matched nothing and rendered 0×0. */
+	.brand .mark,
+	.auth-brand .mark {
 		width: 26px;
 		height: 26px;
 		border-radius: 8px;
@@ -494,7 +565,8 @@
 		display: grid;
 		place-items: center;
 	}
-	.brand .mark svg {
+	.brand .mark svg,
+	.auth-brand .mark svg {
 		width: 15px;
 		height: 15px;
 	}
@@ -718,13 +790,16 @@
 		align-items: center;
 		gap: 6px;
 	}
+	/* In flow under the number, not floating at the bottom-right: an absolute box
+	   sat on top of a six-digit value in a phone-width card (#568). */
 	.stat .spark {
-		position: absolute;
-		right: 14px;
-		bottom: 12px;
-		width: 86px;
-		height: 30px;
+		margin-top: 10px;
+		height: 26px;
 		opacity: 0.9;
+		color: var(--accent);
+	}
+	.stat .spark svg {
+		width: 100%;
 	}
 
 	/* Emphasis StatCard (#197): one KPI stands out. Light = brand-filled (pops on the
@@ -737,7 +812,8 @@
 	.stat.emphasis .label,
 	.stat.emphasis .value,
 	.stat.emphasis .value small,
-	.stat.emphasis .delta {
+	.stat.emphasis .delta,
+	.stat.emphasis .spark {
 		color: var(--brand-contrast);
 	}
 	.stat.emphasis .value small,
@@ -755,7 +831,9 @@
 		color: var(--text-muted);
 	}
 	:root[data-theme='dark'] .stat.emphasis .value,
-	.theme-dark .stat.emphasis .value {
+	.theme-dark .stat.emphasis .value,
+	:root[data-theme='dark'] .stat.emphasis .spark,
+	.theme-dark .stat.emphasis .spark {
 		color: var(--brand);
 	}
 	:root[data-theme='dark'] .stat.emphasis .value small,
@@ -774,7 +852,8 @@
 		:root:not([data-theme='light']) .stat.emphasis .label {
 			color: var(--text-muted);
 		}
-		:root:not([data-theme='light']) .stat.emphasis .value {
+		:root:not([data-theme='light']) .stat.emphasis .value,
+		:root:not([data-theme='light']) .stat.emphasis .spark {
 			color: var(--brand);
 		}
 		:root:not([data-theme='light']) .stat.emphasis .value small,

@@ -1,7 +1,7 @@
-import { error, text, type RequestHandler } from '@sveltejs/kit';
+import { error, type RequestHandler } from '@sveltejs/kit';
 import PocketBase from 'pocketbase';
-import { env } from '$env/dynamic/private';
-import { createPocketBase } from '$lib/server/pb-client';
+import { PB_URL, WEB_PB_USERNAME, WEB_PB_PASSWORD, WEB_PB_COLLECTION } from '$app/env/private';
+import { createPocketBase } from '#lib/server/pb-client.js';
 
 // A heartbeat check-in: the user's cron/job hits /ping/{token} on each run. There
 // is no user session — the unguessable token IS the credential. Recording the
@@ -10,7 +10,7 @@ import { createPocketBase } from '$lib/server/pb-client';
 let servicePb: PocketBase | null = null;
 
 async function pocketbase(): Promise<PocketBase> {
-	if (!env.PB_URL || !env.WEB_PB_USERNAME || !env.WEB_PB_PASSWORD) {
+	if (!PB_URL || !WEB_PB_USERNAME || !WEB_PB_PASSWORD) {
 		throw error(503, 'Heartbeat check-in is not configured');
 	}
 	if (!servicePb) {
@@ -18,8 +18,8 @@ async function pocketbase(): Promise<PocketBase> {
 	}
 	if (!servicePb.authStore.isValid) {
 		await servicePb
-			.collection(env.WEB_PB_COLLECTION || 'service_accounts')
-			.authWithPassword(env.WEB_PB_USERNAME, env.WEB_PB_PASSWORD);
+			.collection(WEB_PB_COLLECTION || 'service_accounts')
+			.authWithPassword(WEB_PB_USERNAME, WEB_PB_PASSWORD);
 	}
 	return servicePb;
 }
@@ -59,7 +59,7 @@ async function checkIn(token: string): Promise<void> {
 
 const handler: RequestHandler = async ({ params }) => {
 	await checkIn(params.token!);
-	return text('OK\n');
+	return new Response('OK\n');
 };
 
 // Cron tools use various verbs; accept the common ones.

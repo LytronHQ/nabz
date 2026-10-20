@@ -1,13 +1,13 @@
 <script lang="ts">
-	import LegalPage from '$lib/components/legal/legal-page.svelte';
+	import LegalPage from '#lib/components/legal/legal-page.svelte';
 </script>
 
-<LegalPage title="Privacy Policy" lastUpdated="2026-08-15">
+<LegalPage title="Privacy Policy" lastUpdated="2026-10-19">
 	<h2>Who we are</h2>
 	<p>
-		nabz ("we", "us") is an uptime-monitoring service operated from the European Union and reachable
-		at <a href="https://nabz.sh">nabz.sh</a>. This policy explains what personal data we collect,
-		why, and your rights over it. Questions:
+		nabz ("we", "us") is an uptime-monitoring service run by Lytron Systems Ltd and operated from
+		the United Kingdom, reachable at <a href="https://nabz.sh">nabz.sh</a>. This policy explains
+		what personal data we collect, why, and your rights over it. Questions:
 		<a href="mailto:privacy@nabz.sh">privacy@nabz.sh</a>.
 	</p>
 
@@ -17,8 +17,16 @@
 			<strong>Account data</strong> — your email address, and an optional display name and avatar.
 		</li>
 		<li>
+			<strong>Sign-in with GitHub or Google</strong> — only if you choose it. We receive your email address,
+			name and profile picture from that provider, and keep your email, which provider you used and your
+			account ID there. The name and picture fill in your profile the first time you sign in, and you
+			can change them. We do not keep the provider's access token, and we cannot see your password there
+			or anything else in that account.
+		</li>
+		<li>
 			<strong>Monitoring configuration</strong> — the URLs, hosts, and settings of the monitors you create,
-			your alert channels (e.g. a webhook URL, a Slack/Telegram destination), and escalation policies.
+			your alert channels (e.g. a webhook URL, a Slack/Telegram destination, or a device's push notification
+			subscription), and escalation policies.
 		</li>
 		<li>
 			<strong>Monitoring results</strong> — the check results, incidents, and response-time history produced
@@ -46,13 +54,28 @@
 		possible:
 	</p>
 	<ul>
-		<li><strong>Hetzner</strong> (Germany) — our servers and the PocketBase datastore.</li>
+		<li>
+			<strong>Hetzner</strong> — our servers. Your account data, the datastore, and its processing are
+			in Germany. Checks run from probes in Germany and Singapore: a probe in Singapore receives the targets
+			of the monitors you run from that region, and the check results it produces.
+		</li>
 		<li>
 			<strong>Cloudflare</strong> — serving and protecting the web application, and backup storage (R2).
 		</li>
 		<li>
 			<strong>MailerSend</strong> — sending transactional and alert email (account verification, password
 			resets, and your incident alerts).
+		</li>
+		<li>
+			<strong>GitHub and Google</strong> — only if you sign in with one of them. You sign in on their
+			page, and they send us the account details listed above.
+		</li>
+		<li>
+			<strong>Your browser's push service</strong> — only if you turn on push notifications. Alerts reach
+			your device through the push service its browser uses (Google for Chrome and Android, Apple for
+			Safari and iOS, Mozilla for Firefox, Microsoft for Edge on Windows). Each alert is encrypted for
+			your device before it leaves our servers, so the push service relays it without being able to read
+			it.
 		</li>
 	</ul>
 
@@ -72,16 +95,18 @@
 
 	<h2>Your rights</h2>
 	<p>
-		If you are in the EU/EEA (or a comparable jurisdiction) you have the right to access, correct,
-		export, or delete your personal data, and to object to or restrict certain processing. You can
-		change your email, display name, and password from your account page, delete your account, or
-		contact <a href="mailto:privacy@nabz.sh">privacy@nabz.sh</a> to exercise any of these rights.
+		If you are in the UK or the EU/EEA (or a comparable jurisdiction) you have the right to access,
+		correct, export, or delete your personal data, and to object to or restrict certain processing.
+		You can change your email, display name, and password from your account page. To delete your
+		account or exercise any other of these rights, contact <a href="mailto:privacy@nabz.sh"
+			>privacy@nabz.sh</a
+		>.
 	</p>
 
 	<h2>Cookies</h2>
 	<p>
 		We use a small number of strictly-necessary cookies: a session cookie to keep you signed in, a
-		security cookie for the sign-in flow, and — only if you use the anonymous trial — a signed
+		security cookie for the sign-in flow, and — only if you use the anonymous trial — an encrypted
 		session cookie holding the opaque trial token. We do not use advertising or third-party tracking
 		cookies.
 	</p>

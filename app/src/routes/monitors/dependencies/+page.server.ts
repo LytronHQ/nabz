@@ -15,7 +15,7 @@ export const load: PageServerLoad = async ({ locals }) => {
 		sort: 'name'
 	});
 
-	const monitors = rows.map((m: any) => ({
+	const monitors = rows.map((m) => ({
 		id: m.id as string,
 		name: (m.name as string) ?? '',
 		// A disabled monitor isn't scheduled, so surface it as paused (matches the map).

@@ -1,10 +1,9 @@
-import { json } from '@sveltejs/kit';
 import { type ZodTypeAny } from 'zod';
 
 export default class BaseEntityValidator {
 	constructor(
 		public schema: ZodTypeAny,
-		public item: any
+		public item: unknown
 	) {}
 
 	get isValid() {
@@ -27,7 +26,7 @@ export default class BaseEntityValidator {
 	}
 
 	public getInvalidDataResponse() {
-		return json(
+		return Response.json(
 			{
 				success: false,
 				message: 'Invalid data. Please try again.',

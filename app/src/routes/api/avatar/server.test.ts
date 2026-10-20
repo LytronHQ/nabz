@@ -1,7 +1,19 @@
 import { describe, test, expect, vi, beforeEach } from 'vitest';
 
 const mockEnv: Record<string, string | undefined> = {};
-vi.mock('$env/dynamic/private', () => ({ env: mockEnv }));
+// Getters, not values: the module reads these per call, and each test sets its
+// own mockEnv before importing (unset reads as '', like the real module).
+vi.mock('$app/env/private', () => ({
+	get PB_URL() {
+		return mockEnv.PB_URL ?? '';
+	},
+	get CF_ACCESS_CLIENT_ID() {
+		return mockEnv.CF_ACCESS_CLIENT_ID ?? '';
+	},
+	get CF_ACCESS_CLIENT_SECRET() {
+		return mockEnv.CF_ACCESS_CLIENT_SECRET ?? '';
+	}
+}));
 
 const { GET } = await import('./+server');
 
@@ -13,11 +25,15 @@ function localsWith(avatar: string | undefined) {
 				getURL: (_r: unknown, f: string) => `https://pb.example.test/api/files/users/u1/${f}`
 			}
 		}
-	} as any;
+	};
 }
 
-async function call(locals: any, fetchImpl: any) {
-	return GET({ locals, fetch: fetchImpl } as any);
+// Only what the route uses: init.headers is a plain object here, never a Headers.
+type FakeFetch = (url: string, init: { headers: Record<string, string> }) => Promise<Response>;
+
+// A partial RequestEvent: the route reads only locals.pb and fetch.
+async function call(locals: ReturnType<typeof localsWith>, fetchImpl: FakeFetch) {
+	return GET({ locals, fetch: fetchImpl } as unknown as Parameters<typeof GET>[0]);
 }
 
 describe('avatar proxy', () => {
@@ -34,7 +50,7 @@ describe('avatar proxy', () => {
 		mockEnv.CF_ACCESS_CLIENT_SECRET = 'secret-456';
 		let seenUrl = '';
 		let seenHeaders: Record<string, string> = {};
-		const res = await call(localsWith('face.png'), (url: string, init: any) => {
+		const res = await call(localsWith('face.png'), (url, init) => {
 			seenUrl = url;
 			seenHeaders = init.headers;
 			return Promise.resolve(new Response('PNGDATA', { headers: { 'content-type': 'image/png' } }));
