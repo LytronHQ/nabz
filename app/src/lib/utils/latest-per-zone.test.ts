@@ -26,7 +26,12 @@ describe('latestPerZone (#406)', () => {
 		// wrong for the other, and nothing here should depend on the caller.
 		const forward = latestPerZone(OLDEST_FIRST);
 		const reversed = latestPerZone([...OLDEST_FIRST].reverse());
-		const shuffled = latestPerZone([OLDEST_FIRST[2], OLDEST_FIRST[0], OLDEST_FIRST[3], OLDEST_FIRST[1]]);
+		const shuffled = latestPerZone([
+			OLDEST_FIRST[2],
+			OLDEST_FIRST[0],
+			OLDEST_FIRST[3],
+			OLDEST_FIRST[1]
+		]);
 		expect(reversed).toEqual(forward);
 		expect(shuffled).toEqual(forward);
 	});

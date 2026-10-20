@@ -2,6 +2,31 @@
 
 Notable changes to nabz. Newest first.
 
+## v0.12.0
+
+_2026-10-20_
+
+- **Adding an alert channel right after opening the page works first time** — if you saved before the list had finished loading, the channel was created but the dialog stayed open and the list stayed empty, inviting a second, duplicate save. Monitors and dependencies had the same gap and are fixed too.
+- **The response-time chart no longer shows nabz's own network trouble as slowness** — checks that were not counted are left out of the chart and its scale, and marked as small rings under the time axis instead of 20-second spikes.
+- **Uptime no longer counts nabz's own network trouble** — when a check fails, the probing location immediately tests its own connection; if that fails too, the check is marked *not counted* instead of lowering the site's uptime or opening an incident. A failure seen from one region with a healthy connection still counts: the site really was down for that region.
+- **The installed desktop app has no browser title bar**, its window buttons match the app's light or dark theme, and the window title no longer reads "nabz - Dashboard | nabz".
+- **Account emails are sent** — sign-up verification, password reset and email change now arrive, from no-reply@nabz.sh.
+- **Push channels are named by browser and push service** ("Edge (Microsoft push)") rather than a guessed device.
+- **Sign in with GitHub or Google** — one tap on the sign-in and sign-up pages, no password to choose and no verification email to wait for. If the email matches an account you already have, you land in that account rather than a new one. Your name and picture are filled in the first time and are yours to change after. A cancelled or failed attempt now says so on the sign-in page instead of quietly bouncing you back to it.
+- **Connect GitHub or Google from your account page** — a new Sign-in methods section shows which ones are connected and since when. Connect another, even if it uses a different email, or disconnect one; your email and password keep working either way. Connecting an account that is already linked to someone else is refused, and you stay signed in as yourself.
+- **The usage page no longer shows a healthy web as "Stale"** — it judged every heartbeat against 30 seconds, and the web only reports every two minutes.
+- **Push notifications to your phone** — a new alert channel that sends alerts straight to the device you set it up on, through the browser's own push service. No app to install: on Android it works from Chrome, and on iPhone or iPad once nabz is added to the Home Screen. Tap a notification to open the incident. Add one channel per device; a test send works like any other channel.
+- **Uptime no longer dips on sites that never went down** — about 1 in 200 checks failed in a few milliseconds because a check reused a connection the site's edge had just closed. Every check now opens its own connection, which also makes the DNS, connect and TLS timings real.
+- **Certificate, latency and domain alerts now appear in a channel's delivery log** — they were sent, but the log refused to record them, so a failed one was invisible.
+- **The installed app's icon fills its shape on Android** instead of sitting on a white circle.
+- **A region can now run on more than one machine** — put as many workers in a region as you like, on any hosts, and they split that region's monitors between them: every monitor is still checked exactly once per interval, and it does not matter which worker takes it. They coordinate through the database alone, so there is nothing new to run. If a worker dies the others pick up its monitors within about a minute; if one joins, the split rebalances.
+- **A region can span providers** — a region can be one worker on a VPS and another on Fly.io, deployed together by one command so the two can never drift onto different versions.
+- **A region is only reported dead when every one of its workers is** — one worker publishes the region's heartbeat, and if it goes quiet another takes over, so a single worker restarting no longer makes a healthy region look down.
+- **A region is now a single, stateless container** — the per-region queue is gone; a worker keeps its own schedule in memory. Nothing to place, nothing to back up, nothing to keep in step: a region can be moved to another host by starting a container there.
+- **Checks no longer queue behind one slow target** — a worker runs several checks at once (`WORKER_CONCURRENCY`, default 8) instead of one at a time, so a target that hangs for its full 20-second timeout no longer holds up everything else in that region. Raising it is still the cheapest way to give a busy region more capacity, and needs no coordination at all.
+- **Paused and deleted monitors stop being probed sooner** — the worker now re-syncs its schedule in both directions every 30 seconds, where before it only ever added, and noticed a removal when the monitor's turn came round.
+- **Restarts no longer stampede** — a region's first checks after a restart are spread across the interval rather than all firing at once. One consequence worth knowing: a **newly created monitor can wait up to one interval for its first check**.
+
 ## v0.11.1
 
 _2026-08-30_

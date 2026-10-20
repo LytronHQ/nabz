@@ -77,7 +77,7 @@ func dialControl() func(network, address string, c syscall.RawConn) error {
 // guardedHTTPTransport is a clone of the default transport whose dialer enforces
 // the guard on every connection (initial request + each redirect hop). Built once.
 var guardedHTTPTransport = func() *http.Transport {
-	t := http.DefaultTransport.(*http.Transport).Clone()
+	t := checkTransport()
 	t.DialContext = (&net.Dialer{
 		Timeout:   30 * time.Second,
 		KeepAlive: 30 * time.Second,
@@ -90,7 +90,21 @@ var guardedHTTPTransport = func() *http.Transport {
 // when BLOCK_PRIVATE_TARGETS is on, otherwise the shared default (unchanged behavior).
 func httpTransport() http.RoundTripper {
 	if !blockPrivateTargets {
-		return http.DefaultTransport
+		return plainHTTPTransport
 	}
 	return guardedHTTPTransport
 }
+
+// Both check transports dial a new connection for every check. Sharing a
+// keep-alive pool sent some checks out on a connection the target's edge had
+// just closed: they failed in a few milliseconds with no status code, about 0.5%
+// of checks against sites that answered 200 to every request that reached them
+// (#595). A monitor should also measure what a visitor pays — DNS, connect and
+// TLS — which a reused connection skips.
+func checkTransport() *http.Transport {
+	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.DisableKeepAlives = true
+	return t
+}
+
+var plainHTTPTransport = checkTransport()

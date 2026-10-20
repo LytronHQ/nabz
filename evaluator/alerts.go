@@ -41,6 +41,11 @@ type alertConfig struct {
 	webBeat       time.Duration
 	certWarn      time.Duration
 	domainWarn    time.Duration
+	// Web Push (#602). Without both keys a push channel is skipped, like an
+	// email channel without SMTP.
+	vapidPublic  string
+	vapidPrivate string
+	vapidSubject string
 }
 
 func loadAlertConfig() alertConfig {
@@ -79,8 +84,22 @@ func loadAlertConfig() alertConfig {
 		webBeat:       time.Duration(webBeatSecs) * time.Second,
 		certWarn:      time.Duration(certWarnDays) * 24 * time.Hour,
 		domainWarn:    time.Duration(domainWarnDays) * 24 * time.Hour,
+		vapidPublic:   os.Getenv("VAPID_PUBLIC_KEY"),
+		vapidPrivate:  os.Getenv("VAPID_PRIVATE_KEY"),
+		vapidSubject:  vapidSubject(os.Getenv("VAPID_SUBJECT")),
 	}
 }
+
+// vapidSubject is the contact push services see in the VAPID token. Apple
+// rejects a subject that is neither a URL nor mailto: (BadJwtToken).
+func vapidSubject(v string) string {
+	if v == "" {
+		return "https://nabz.sh"
+	}
+	return v
+}
+
+func (a alertConfig) pushEnabled() bool { return a.vapidPublic != "" && a.vapidPrivate != "" }
 
 func (a alertConfig) emailEnabled() bool { return a.smtpHost != "" && a.smtpFrom != "" }
 
@@ -433,6 +452,14 @@ func dispatch(cfg alertConfig, channels []models.AlertChannel, subject, body str
 				log.Printf("Alerts: email to %s failed: %s", ch.Address(), err)
 				r.Outcome, r.Detail = "failed", err.Error()
 			}
+		case "push":
+			if !cfg.pushEnabled() {
+				log.Printf("Alerts: push channel %s skipped (VAPID keys not configured)", ch.Id)
+				r.Outcome, r.Detail = "skipped", "push keys not configured"
+			} else if err := sendPush(cfg, ch, subject, body, payload); err != nil {
+				log.Printf("Alerts: push to channel %s failed: %s", ch.Id, err)
+				r.Outcome, r.Detail = "failed", err.Error()
+			}
 		default:
 			log.Printf("Alerts: unknown channel type %q", ch.Type)
 			r.Outcome, r.Detail = "failed", "unknown channel type"
@@ -445,12 +472,14 @@ func dispatch(cfg alertConfig, channels []models.AlertChannel, subject, body str
 // summarize reduces per-channel results to (sent, note) for the incident timeline
 // and test-result message.
 func summarize(results []deliveryResult) (int, string) {
-	sent, smtpSkipped, failed := 0, 0, 0
+	sent, smtpSkipped, pushSkipped, failed := 0, 0, 0, 0
 	for _, r := range results {
-		switch r.Outcome {
-		case "delivered":
+		switch {
+		case r.Outcome == "delivered":
 			sent++
-		case "skipped":
+		case r.Outcome == "skipped" && r.Channel.Type == "push":
+			pushSkipped++
+		case r.Outcome == "skipped":
 			smtpSkipped++
 		default:
 			failed++
@@ -459,6 +488,9 @@ func summarize(results []deliveryResult) (int, string) {
 	var notes []string
 	if smtpSkipped > 0 {
 		notes = append(notes, fmt.Sprintf("%d email skipped (SMTP not configured)", smtpSkipped))
+	}
+	if pushSkipped > 0 {
+		notes = append(notes, fmt.Sprintf("%d push skipped (push keys not configured)", pushSkipped))
 	}
 	if failed > 0 {
 		notes = append(notes, fmt.Sprintf("%d failed to send", failed))
@@ -590,10 +622,10 @@ func isHeartbeatStale(updated string, now time.Time, threshold time.Duration) bo
 func httpErrDetail(provider string, res utils.HTTPResult) error {
 	reason := strings.TrimSpace(string(res.Body))
 	// Common JSON error shapes: Telegram {description}, Discord {message},
-	// generic {error}.
+	// Apple's push service {reason}, generic {error}.
 	var j map[string]interface{}
 	if json.Unmarshal(res.Body, &j) == nil {
-		for _, k := range []string{"description", "message", "error"} {
+		for _, k := range []string{"description", "message", "reason", "error"} {
 			if v, ok := j[k].(string); ok && strings.TrimSpace(v) != "" {
 				reason = strings.TrimSpace(v)
 				break

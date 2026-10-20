@@ -27,6 +27,16 @@ type HTTPResult struct {
 // are returned as-is and are NOT retried here — the caller handles them (e.g. a
 // 401 triggers a token refresh in the PocketBase client).
 func DoRequest(method, url string, body []byte, token string) (HTTPResult, error) {
+	return DoRequestWithHeaders(method, url, body, token, nil)
+}
+
+// DoRequestWithHeaders is DoRequest plus extra headers, for a PocketBase that is
+// reached through Cloudflare Access: the service-token pair has to be on the
+// request or Cloudflare answers 403 before PocketBase ever sees it.
+//
+// Header VALUES are never logged. A failed request logs the method and URL only,
+// which is why the retry logging below stayed as it was.
+func DoRequestWithHeaders(method, url string, body []byte, token string, headers map[string]string) (HTTPResult, error) {
 	var lastErr error
 
 	for attempt := 0; attempt < httpMaxAttempts; attempt++ {
@@ -47,6 +57,11 @@ func DoRequest(method, url string, body []byte, token string) (HTTPResult, error
 		req.Header.Set("Content-Type", "application/json")
 		if token != "" {
 			req.Header.Set("Authorization", token)
+		}
+		for k, v := range headers {
+			if v != "" {
+				req.Header.Set(k, v)
+			}
 		}
 
 		res, err := httpClient.Do(req)

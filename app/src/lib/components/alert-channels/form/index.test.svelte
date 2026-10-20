@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { AlertChannelNewItem } from '$lib/models/alert-channel';
+	import { AlertChannelNewItem } from '#lib/models/alert-channel.js';
 	import { Form } from '../';
 
 	const data = new AlertChannelNewItem({

@@ -40,7 +40,13 @@ export default defineConfig({
 	globalTeardown: './global-teardown.ts',
 	use: {
 		baseURL: WEB,
-		trace: 'retain-on-failure'
+		trace: 'retain-on-failure',
+		// The app registers a service worker (#493). Playwright's headless shell
+		// segfaults when a traced context with a live service worker closes (3 of 40
+		// runs with tracing, 0 of 40 without, 0 of 40 in full Chromium), which showed
+		// up as random "browser has been closed" failures. Only pwa-update.spec
+		// exercises the worker, and it runs in full Chromium.
+		serviceWorkers: 'block'
 	},
 	// Chromium backs the browser (UI) journeys. The API pipeline spec only uses the
 	// `request` fixture, so it runs fine under the same project without a page.

@@ -1,6 +1,6 @@
 import type PocketBase from 'pocketbase';
-import { isStale } from '$lib/utils/format-utils';
-import { EVALUATOR_ZONE } from '$lib/server/health';
+import { isStale } from '#lib/utils/format-utils.js';
+import { EVALUATOR_ZONE, WEB_ZONE, staleLimits } from '#lib/server/health.js';
 
 // Product-usage aggregation for /admin/usage (#246): "is nabz being used, and is
 // that growing?" — a handful of counts on one screen, NOT an analytics product.
@@ -134,7 +134,7 @@ async function collect(pb: PocketBase): Promise<UsageStats> {
 			`outcome = "failed" && created >= "${pbDate(new Date(now.getTime() - 90 * 24 * 60 * 60_000))}"`
 		),
 		total(pb, 'dependencies'),
-		pb.collection('rollups').getFullList({
+		pb.collection('rollups').getFullList<{ bucket_start?: string; check_count?: number }>({
 			filter: `period = "day" && bucket_start >= "${dayRollupsSince}"`,
 			fields: 'bucket_start,check_count'
 		})
@@ -154,16 +154,16 @@ async function collect(pb: PocketBase): Promise<UsageStats> {
 			paused: monitorsTotal - monitorsActive,
 			newThisWeek: monitorsWeek
 		},
-		activeUsers: distinctCount(enabledMonitorOwners as any[], 'user'),
-		usersWithChannel: distinctCount(channelRows as any[], 'user'),
+		activeUsers: distinctCount(enabledMonitorOwners, 'user'),
+		usersWithChannel: distinctCount(channelRows, 'user'),
 		activity: {
-			checksPerDay: checksPerDay(dayRollups as any[]),
+			checksPerDay: checksPerDay(dayRollups),
 			incidentsTotal,
 			incidentsThisWeek: incidentsWeek
 		},
 		alerting: {
-			channelsTotal: (channelRows as any[]).length,
-			channelsByType: countBy(channelRows as any[], 'type'),
+			channelsTotal: channelRows.length,
+			channelsByType: countBy(channelRows, 'type'),
 			escalationPolicies,
 			testAlerts,
 			delivered90d,
@@ -202,7 +202,11 @@ export type FleetZone = {
 	healthy: boolean;
 };
 
-export async function getFleetOps(pb: PocketBase): Promise<FleetZone[]> {
+export async function getFleetOps(
+	pb: PocketBase,
+	limits: { staleMs: number; webStaleMs: number } = staleLimits({}),
+	now: number = Date.now()
+): Promise<FleetZone[]> {
 	const rows = await pb.collection('zone_stats').getFullList({ sort: 'zone' });
 	return rows.map((z: Record<string, unknown>) => ({
 		zone: z.zone as string,
@@ -214,6 +218,11 @@ export async function getFleetOps(pb: PocketBase): Promise<FleetZone[]> {
 		workers: (z.workers as number) ?? 1,
 		worker: (z.worker as string) ?? '',
 		updated: z.updated as string,
-		healthy: !isStale(z.updated as string)
+		// The same thresholds as /api/health, so the two never disagree (#611).
+		healthy: !isStale(
+			z.updated as string,
+			(z.zone === WEB_ZONE ? limits.webStaleMs : limits.staleMs) / 1000,
+			now
+		)
 	}));
 }

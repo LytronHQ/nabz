@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { EntityIdType } from '$lib/constants';
+	import type { EntityIdType } from '#lib/constants.js';
 	import { onMount } from 'svelte';
 	import {
 		Modal,
@@ -8,18 +8,18 @@
 		Pagination,
 		AddButton,
 		EmptyState
-	} from '$lib/components/common';
-	import { Form, List } from '$lib/components/alert-channels';
+	} from '#lib/components/common/index.js';
+	import { Form, List } from '#lib/components/alert-channels/index.js';
 	import {
 		AlertChannelNewItem,
 		AlertChannelItem,
 		AlertChannelsList
-	} from '$lib/models/alert-channel';
-	import AlertChannelsStore from '$lib/stores/alert-channels-store';
-	import type ApiError from '$lib/models/api-error';
-	import { pushToast } from '$lib/stores/toast-store';
-	import { friendlyMessage } from '$lib/utils/api-error-utils';
-	import { routeSaveError } from '$lib/utils/form-utils';
+	} from '#lib/models/alert-channel.js';
+	import AlertChannelsStore from '#lib/stores/alert-channels-store.js';
+	import type ApiError from '#lib/models/api-error.js';
+	import { pushToast } from '#lib/stores/toast-store.js';
+	import { friendlyMessage } from '#lib/utils/api-error-utils.js';
+	import { routeSaveError } from '#lib/utils/form-utils.js';
 
 	let channels: AlertChannelsList | undefined = $state();
 	let addModal: Modal | undefined = $state();
@@ -63,12 +63,16 @@
 	}
 
 	function openAddModal() {
-		newItem = new AlertChannelNewItem();
+		// A plain copy: Svelte 5 does not make class instances reactive, so with the
+		// instance itself, picking another type never swapped the form's fields.
+		newItem = { ...new AlertChannelNewItem() };
 		addErrors = {};
 		addModal!.openModal();
 	}
 	function openEditModal(detail: { id: EntityIdType }) {
-		editItem = channels!.items.filter((e) => e.id === detail.id)[0];
+		const found = channels!.items.find((e) => e.id === detail.id);
+		// Plain copy for the same reason as newItem, and so Cancel leaves the list alone.
+		editItem = found ? { ...found } : undefined;
 		editErrors = {};
 		editModal!.openModal();
 	}

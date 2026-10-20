@@ -13,8 +13,13 @@ import { EmptyState } from './empty-state';
 import { Select } from './select';
 import { Toggle } from './toggle';
 import { Alert } from './alert';
+import { AuthCard } from './auth-card';
+import { ThemeToggle } from './theme-toggle';
+import { OAuthButtons, ProviderMark } from './oauth-buttons';
 
 export {
+	OAuthButtons,
+	ProviderMark,
 	H3,
 	Icon,
 	Modal,
@@ -29,5 +34,7 @@ export {
 	EmptyState,
 	Select,
 	Toggle,
-	Alert
+	Alert,
+	AuthCard,
+	ThemeToggle
 };

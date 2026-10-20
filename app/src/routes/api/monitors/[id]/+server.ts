@@ -1,7 +1,7 @@
-import { json, type RequestHandler } from '@sveltejs/kit';
-import { MonitorItem, MonitorItemValidator, toMonitorConfig } from '$lib/models/monitor';
-import { failIfNoId, failIfNoResponse, failIfNoUser } from '$lib/utils/api-utils';
-import { getApiErrors } from '$lib/utils/action-utils';
+import type { RequestHandler } from '@sveltejs/kit';
+import { MonitorItem, MonitorItemValidator, toMonitorConfig } from '#lib/models/monitor.js';
+import { failIfNoId, failIfNoResponse, failIfNoUser } from '#lib/utils/api-utils.js';
+import { getApiErrors } from '#lib/utils/action-utils.js';
 
 export const GET: RequestHandler = async ({ locals, params: { id } }) => {
 	failIfNoUser(locals);
@@ -14,9 +14,9 @@ export const GET: RequestHandler = async ({ locals, params: { id } }) => {
 
 		const item = failIfNoResponse(response);
 
-		return json(new MonitorItem(item));
+		return Response.json(new MonitorItem(item));
 	} catch (err) {
-		return json(getApiErrors(err, `Error getting monitor: ${id}`));
+		return Response.json(getApiErrors(err, `Error getting monitor: ${id}`));
 	}
 };
 
@@ -47,9 +47,9 @@ export const PATCH: RequestHandler = async ({ locals, request, params: { id } })
 
 		const item = failIfNoResponse(response);
 
-		return json(new MonitorItem(item));
+		return Response.json(new MonitorItem(item));
 	} catch (err) {
-		return json(getApiErrors(err, `Error updating monitor: ${id}`), { status: 500 });
+		return Response.json(getApiErrors(err, `Error updating monitor: ${id}`), { status: 500 });
 	}
 };
 
@@ -64,6 +64,6 @@ export const DELETE: RequestHandler = async ({ locals, params: { id } }) => {
 
 		return new Response(null, { status: 204 });
 	} catch (err) {
-		return json(getApiErrors(err, `Error deleting monitor: ${id}`), { status: 500 });
+		return Response.json(getApiErrors(err, `Error deleting monitor: ${id}`), { status: 500 });
 	}
 };

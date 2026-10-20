@@ -10,7 +10,10 @@ declare global {
 			user?: PocketBase['authStore']['record'];
 			// Opaque anonymous "try it" session token (#269); '' when signed out and no trial started.
 			anonSession?: string;
-			getPocketBaseFileUrl: (record: any, fileName: any) => string | undefined;
+			getPocketBaseFileUrl: (
+				record: { [key: string]: unknown },
+				fileName: string
+			) => string | undefined;
 		}
 		// interface PageData {}
 		// interface PageState {}

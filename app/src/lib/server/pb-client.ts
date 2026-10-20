@@ -1,5 +1,5 @@
 import PocketBase from 'pocketbase';
-import { env } from '$env/dynamic/private';
+import { CF_ACCESS_CLIENT_ID, CF_ACCESS_CLIENT_SECRET, PB_URL } from '$app/env/private';
 
 // The single place a PocketBase client is constructed (#338).
 //
@@ -20,8 +20,8 @@ import { env } from '$env/dynamic/private';
  * service token is configured (dev, or a self-hosted web VM reaching PB
  * directly) — Access simply isn't in the path there. */
 export function accessHeaders(): Record<string, string> {
-	const id = env.CF_ACCESS_CLIENT_ID;
-	const secret = env.CF_ACCESS_CLIENT_SECRET;
+	const id = CF_ACCESS_CLIENT_ID;
+	const secret = CF_ACCESS_CLIENT_SECRET;
 	if (!id || !secret) return {};
 	return { 'CF-Access-Client-Id': id, 'CF-Access-Client-Secret': secret };
 }
@@ -32,7 +32,7 @@ export function accessHeaders(): Record<string, string> {
  * dashboard's per-status counts, /admin/usage aggregation), and the SDK would
  * otherwise abort them as "duplicates". */
 export function createPocketBase(): PocketBase {
-	const pb = new PocketBase(env.PB_URL);
+	const pb = new PocketBase(PB_URL);
 	pb.autoCancellation(false);
 
 	const headers = accessHeaders();

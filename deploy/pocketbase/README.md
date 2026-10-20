@@ -11,7 +11,7 @@ admin-UI clicks.
 `PB_VERSION` (and optionally `PB_SHA256`) pin the release the image is built from:
 
 ```bash
-PB_VERSION=0.28.4 docker compose -f deploy/pocketbase.yml build
+PB_VERSION=0.40.5 docker compose -f deploy/pocketbase.yml build
 ```
 
 ## Upgrading — `upgrade.sh`
@@ -58,22 +58,61 @@ What it does:
 Overridable env: `SNAP_DIR`, `RETAIN`, `HEALTH_RETRIES`, `PB_PORT`, `ENV_FILE`,
 `APP_DIR`, `PB_SNAPSHOT_UPLOAD_CMD`.
 
+The mechanism is `container.sh upgrade`, the `upgrade` module of
+[LytronHQ/ops](https://github.com/LytronHQ/ops). It is not in this repo: it is
+fetched into `deploy/.ops/` from the release pinned in [`../ops.lock`](../ops.lock)
+and shipped to the node by `remote-deploy.sh`. Do not edit the fetched copy —
+`deploy/ops-fetch.sh` replaces anything whose hash does not match. `upgrade.sh` in
+this folder is the nabz half: where the compose file, the env file and the snapshots
+live.
+
+`--build`, not a pull: `pocketbase.yml` builds from `pocketbase/Dockerfile` with
+`PB_VERSION` as a build argument and tags `nabz-pocketbase:${PB_VERSION}`. There is
+no published image to fetch.
+
+**If `PB_SHA256` is pinned**, it pins the *current* version's zip, and an upgrade
+changes only `PB_VERSION` — so the build fails `sha256sum -c` until you update the
+hash too. Deliberate: a pinned hash that silently stopped matching would be worse.
+
 ## Maintenance and backups (#322)
 
-`maintenance.sh` runs nightly on the PocketBase host via the
-`nabz-pb-maintenance` systemd timer, installed by `setup-pocketbase.sh`. Four
-steps, and the order matters:
+`db.sh maintain` runs nightly on the PocketBase host via the
+`nabz-pb-maintenance` systemd timer, installed by `setup-pocketbase.sh`. It is
+the `database` module of [LytronHQ/ops](https://github.com/LytronHQ/ops), fetched
+into `deploy/.ops/` from the release pinned in [`../ops.lock`](../ops.lock) rather
+than committed here, and shipped to the node by `remote-deploy.sh`. Do not edit the
+fetched copy — `deploy/ops-fetch.sh` replaces anything whose hash does not match.
+The flags live in the unit the setup script writes. Four steps, and the order matters:
 
 1. `PRAGMA wal_checkpoint(TRUNCATE)` — fold the WAL into the main file so the
    backup does not depend on WAL state and the WAL cannot grow unbounded.
-2. `PRAGMA incremental_vacuum(PB_VACUUM_PAGES)` — reclaim free pages, **bounded**
-   (default 20,000 ≈ 80 MiB) so each run is short and predictable.
+2. `PRAGMA incremental_vacuum(N)` — reclaim free pages, **bounded**
+   (`--vacuum-pages`, default 20,000 ≈ 80 MiB) so each run is short and predictable.
 3. Trigger PocketBase's own backup via its API, so the archive restores through
    the normal path.
 4. Which uploads straight to R2, because `backups.s3` is configured.
 
 **Vacuum before backup.** Reversed, the archive captures dead pages: bigger
 upload, slower restore, and the bloat returns on restore.
+
+### Where the credentials and the heartbeat come from
+
+The module takes both as **files**, read as data:
+
+| | |
+|---|---|
+| `--credentials-file` | `/etc/monitors/pocketbase.env`, for `PB_SUPERUSER_EMAIL` / `_PASSWORD` |
+| `--heartbeat-url-file` | `/etc/monitors/pb-heartbeat.url`, mode 0600, written by `setup-pocketbase.sh` from `PB_MAINTENANCE_PING_URL` |
+
+That is not cosmetic. The script this replaced **sourced** the env file, which made
+every value in it shell code, built the auth JSON with `printf` — so a password
+containing `"` misauthenticated — and passed the password in `curl`'s arguments,
+where every user on the host can read it through `ps`. The heartbeat URL is a
+credential too: anyone holding it can keep the dead-man's switch quiet.
+
+If `PB_MAINTENANCE_PING_URL` is unset, the setup script **removes** the file rather
+than leaving it. A stale one would keep pinging after the heartbeat was deleted,
+which is worse than no heartbeat — the monitor stays green over a host doing nothing.
 
 **There is no recurring full `VACUUM`, deliberately.** It holds an exclusive lock
 for its whole duration, rewrites the entire file, and needs free disk equal to the
@@ -87,14 +126,43 @@ switching modes requires a full `VACUUM`. `setup-pocketbase.sh` does this
 automatically **only while the database is still small** (`PB_CONVERT_MAX_BYTES`,
 50 MiB): free on a fresh instance, a write stall on a populated one.
 
-A database that missed the window keeps working — `maintenance.sh` reads the mode
+A database that missed the window keeps working — `db.sh maintain` reads the mode
 and skips the vacuum with an explanation rather than silently doing nothing. To
-convert later, pick a maintenance window and run by hand:
+convert later, pick a maintenance window and run it with **PocketBase stopped** —
+never with `docker exec` into the running container:
 
 ```bash
-docker exec <pb> sqlite3 -cmd '.timeout 30000' /pb_data/data.db \
-  'PRAGMA auto_vacuum = INCREMENTAL; VACUUM;'
+cd /opt/monitors
+docker compose -f deploy/pocketbase.yml stop pocketbase
+docker compose -f deploy/pocketbase.yml run --rm --no-deps --entrypoint sqlite3 pocketbase \
+  /pb_data/data.db 'PRAGMA auto_vacuum = INCREMENTAL; VACUUM;'
+docker compose -f deploy/pocketbase.yml start pocketbase
 ```
+
+### Never open the live database from outside
+
+No `sqlite3`, no `pocketbase … --dir /pb_data`, nothing that opens `pb_data`
+while PocketBase is running. A PocketBase backup closes descriptors to
+`data.db-shm`/`-wal`, which releases the server's POSIX locks on them; the next
+outside process to open the database then believes it is the last connection
+and **deletes the WAL and `-shm` the server is still using**. Writes that were
+only in the WAL are lost on the next restart, and every query starts failing.
+That took production down on 2026-10-10
+([#520](https://github.com/LytronHQ/nabz-internal/issues/520)) — a deploy's
+`superuser upsert`, hours after a backup.
+
+So the deploy reads the vacuum mode from the file header and logs the superuser
+in through the API (`deploy/pb-db-steps.sh`), and only stops PocketBase when it
+genuinely has to touch the files; `db.sh maintain` folds the WAL in through
+PocketBase's own `__pbDBOptimize__` job. `deploy/pb_live_db_test.sh` checks all of
+it against a real PocketBase, after a backup.
+
+If it happens anyway — PocketBase answering every read with *"Something went
+wrong"* — check `ls -l /proc/$(docker inspect -f '{{.State.Pid}}' <pb>)/fd` for
+`(deleted)` database files. **Do not restart first**: copy the deleted WAL out
+through `/proc/<pid>/fd/<n>` before anything else, then merge it into a copy of
+`data.db` and check `PRAGMA integrity_check` there. A restart throws the only copy
+away.
 
 ### Retention lives in exactly one place
 
@@ -116,7 +184,7 @@ Read the last run with `journalctl -u nabz-pb-maintenance`, or
 
 ### Restore
 
-Verified end to end against PocketBase 0.28.4 and the real R2 bucket: a marker row
+Verified end to end against PocketBase 0.40.5 and the real R2 bucket: a marker row
 was written, backed up to R2, dropped, and restored from the R2 archive intact.
 
 ```bash

@@ -28,7 +28,8 @@ set -euo pipefail
 # name | required | where the value comes from
 MANIFEST=(
   "BWS_ACCESS_TOKEN|yes|Bitwarden Secrets Manager > Machine accounts > this environment's account > Access tokens. The workflows read every other value through it, so it is the one secret GitHub genuinely needs."
-  "CF_API_TOKEN|yes|Cloudflare > My Profile > API Tokens > Create Custom Token. Steps + the five permission rows: README, Creating the API credentials. One Cloudflare account and one zone serve both environments, so this lives in nabz-shared."
+  "CF_API_TOKEN|yes|Cloudflare > My Profile > API Tokens > Create Custom Token. Steps + the six permission rows: README, Creating the API credentials (Zone · Workers Routes · Edit is the one a production \`deploy-web\` needs and staging never exercises). One Cloudflare account and one zone serve both environments, so this lives in nabz-shared."
+  "CF_WORKERS_API_TOKEN|no|The \"Edit Cloudflare Workers\" token (Workers Scripts + Workers Routes). \`deploy-web\` uses it to deploy the Worker and push its secrets, and falls back to \`CF_API_TOKEN\` when it is unset. Set straight on the GitHub environment (#510)."
   "CF_ACCOUNT_ID|yes|Cloudflare > any zone > Overview, right sidebar, Account ID. nabz-shared."
   "HCLOUD_TOKEN_RW|yes|Hetzner console > this fleet's project > Security > API tokens, Read & Write."
   "GH_SECRETS_PAT|yes|GitHub > Developer settings > Fine-grained tokens. Owner LytronHQ, this repo. Needs BOTH 'Secrets: Read and write' AND 'Environments: Read and write' — every workflow write is an ENVIRONMENT secret (gh secret set --env), and those are gated by Environments, not Secrets. A token with only Secrets passes every repo-level check and then 403s on the first provisioning step. nabz-shared."
@@ -37,6 +38,10 @@ MANIFEST=(
   "SMTP_PASSWORD|no|MailerSend > Domains > your domain > SMTP. nabz-shared."
   "PB_BACKUP_S3_ACCESS_KEY|no|Cloudflare > R2 > Manage account > Account API tokens (an ACCOUNT token, not the user token under My Profile): Access Key ID."
   "PB_BACKUP_S3_SECRET|no|Cloudflare > R2 > Manage account > Account API tokens: Secret Access Key. Shown once."
+  "OAUTH_GITHUB_CLIENT_ID|no|Sign in with GitHub (#609). LytronHQ org > Settings > Developer settings > OAuth apps > the nabz app: Client ID. Callback URL https://<web host>/auth/callback. Read from Bitwarden by remote-deploy.sh into PocketBase; without both GitHub values the button stays off."
+  "OAUTH_GITHUB_CLIENT_SECRET|no|The same GitHub OAuth app: Generate a new client secret. Shown once."
+  "OAUTH_GOOGLE_CLIENT_ID|no|Sign in with Google (#609). Google Cloud console > Google Auth Platform > Clients > the Web application client: Client ID. Authorized redirect URI https://<web host>/auth/callback."
+  "OAUTH_GOOGLE_CLIENT_SECRET|no|The same Google client: Client secret. Shown only when the client is created."
   "BETTERSTACK_API_TOKEN|no|Better Stack > Settings > API tokens. Used by infra-watch (monitors, the evaluator heartbeat, the Telegram webhooks) and by remote-deploy.sh to look the heartbeat ping URL back up. nabz-shared; the script namespaces per environment."
 )
 
@@ -236,7 +241,10 @@ REPO="${REPO:-$(gh repo view --json nameWithOwner --jq .nameWithOwner)}"
 # than ten variables read back as partly unset — which looks exactly like a
 # half-finished push.
 EXISTING="$(gh api "repos/${REPO}/environments/${ENV_NAME}/secrets?per_page=100" --jq '.secrets[].name' 2>/dev/null || true)"
-EXISTING_VARS="$(gh api "repos/${REPO}/environments/${ENV_NAME}/variables?per_page=100" --jq '.variables[].name' 2>/dev/null || true)"
+# Values as well as names: the newline check below needs to see them, and the
+# reverse-drift pass needs the full set GitHub holds.
+EXISTING_VARS_JSON="$(gh api "repos/${REPO}/environments/${ENV_NAME}/variables?per_page=100" --jq '[.variables[] | {name, value}]' 2>/dev/null || echo '[]')"
+EXISTING_VARS="$(jq -r '.[].name' <<<"$EXISTING_VARS_JSON")"
 
 echo "$REPO — environment '$ENV_NAME'"
 echo
@@ -270,6 +278,62 @@ for row in "${MANIFEST[@]}"; do
   printf '  %-26s %s\n' "$name" "$state"
 done
 
+# --- reverse drift (#414) -----------------------------------------------------
+# The check below the counts asks "is every vars-file key in GitHub". This asks
+# the question nobody was asking: what does GitHub hold that the file does NOT
+# set? A production WRANGLER_ENV sat corrupt for seven days inside that blind
+# spot, because the forward pass skips empty keys and the apply loop never
+# overwrites one — so a stale value is unreachable from either.
+#
+# Exact, not heuristic. No workflow writes a GitHub *variable*: the values the
+# workflows generate (NODES, PB_URL, PB_BIND_IP, PRIVATE_SUBNET, TUNNEL_TOKEN,
+# CF_ACCESS_*) are environment SECRETS, written with `gh secret set`. So every
+# variable in this environment should trace to a line in the vars file, and
+# anything that does not is stale by definition.
+#
+# REPORT ONLY, deliberately. Removing state is an operator's call, not a script's:
+# a wrong delete here is a deploy reading an empty value, which is the same class
+# of fault as the one this catches, arriving faster.
+report_var_drift() {
+  local file_all file_set unset_in_file="" absent_in_file="" newlines name
+  # Every key the file mentions, and the subset it actually gives a value.
+  file_all="$(sed -nE 's/^([A-Za-z_][A-Za-z0-9_]*)=.*/\1/p' "$VARS_FILE")"
+  file_set="$(sed -nE 's/^([A-Za-z_][A-Za-z0-9_]*)=(.+)/\1/p' "$VARS_FILE")"
+
+  while IFS= read -r name; do
+    [ -n "$name" ] || continue
+    if ! grep -qx "$name" <<<"$file_all"; then
+      absent_in_file="$absent_in_file    $name"$'\n'
+    elif ! grep -qx "$name" <<<"$file_set"; then
+      unset_in_file="$unset_in_file    $name"$'\n'
+    fi
+  done <<<"$EXISTING_VARS"
+
+  # A newline is never legitimate in one of these values. Checked independently of
+  # drift: the corrupt value that started this was ALSO drift, but the next one
+  # might be a key the file still sets, and this catches it either way.
+  newlines="$(jq -r '.[] | select(.value | contains("\n")) | "    " + .name + "  (" + (.value | length | tostring) + " bytes, " + (.value | split("\n") | length | tostring) + " lines)"' <<<"$EXISTING_VARS_JSON")"
+
+  [ -n "$absent_in_file$unset_in_file$newlines" ] || return 0
+  echo
+  echo "  DRIFT — in GitHub, but not set by $(basename "$VARS_FILE"):"
+  if [ -n "$absent_in_file" ]; then
+    echo "    · no line in the file at all (the line was removed; GitHub kept the value)"
+    printf '%s' "$absent_in_file"
+  fi
+  if [ -n "$unset_in_file" ]; then
+    echo "    · the file has the key but leaves it empty, so the push skipped it —"
+    echo "      whatever GitHub holds is a leftover from an earlier run"
+    printf '%s' "$unset_in_file"
+  fi
+  if [ -n "$newlines" ]; then
+    echo "    · value contains a NEWLINE, which no setting here legitimately has:"
+    printf '%s\n' "$newlines"
+  fi
+  echo "  Nothing is deleted automatically. To clear one:"
+  echo "    gh variable delete <NAME> --env $ENV_NAME --repo $REPO"
+}
+
 nvars=$(grep -cvE '^\s*(#|$)' "$VARS_FILE" || true)
 ngh=$(grep -c . <<<"$EXISTING_VARS" || true)
 echo
@@ -293,6 +357,8 @@ if [ -n "$missing_vars" ]; then
   printf '%s' "$missing_vars"
   echo "  Re-run without --status to push them."
 fi
+
+report_var_drift
 
 if [ "$BWS_CHECKED" = no ]; then
   echo
@@ -370,6 +436,7 @@ echo "==> applying"
 # Read the file into an array first, so the loop owns no stdin for gh to eat, and
 # give each call </dev/null so it can never consume the terminal either.
 pushed=()
+refused=()
 vars_lines=()
 while IFS= read -r line || [ -n "$line" ]; do vars_lines+=("$line"); done < "$VARS_FILE"
 for line in "${vars_lines[@]}"; do
@@ -384,6 +451,14 @@ for line in "${vars_lines[@]}"; do
     echo "   var  $key  (empty — left unset; that is the same value to a workflow)"
     continue
   fi
+  # Belt and braces (#414). A line read one-at-a-time cannot hold a newline, so
+  # this can only fire if the reading above is ever changed — which is exactly
+  # when it is worth having. The corrupt production value that prompted this came
+  # from a `gh variable set` that swallowed the rest of the file off stdin.
+  case "$val" in
+    *$'\n'*) echo "   var  $key  REFUSED — value contains a newline" >&2
+              refused+=("$key"); continue ;;
+  esac
   if gh variable set "$key" --env "$ENV_NAME" --repo "$REPO" --body "$val" </dev/null; then
     echo "   var  $key"
     pushed+=("$key")
@@ -418,6 +493,21 @@ if [ "${#absent[@]}" -gt 0 ]; then
   exit 1
 fi
 echo "   ${#pushed[@]} variable(s) confirmed in GitHub"
+
+# Same reverse pass --status runs. Here it matters more: this is the run that has
+# just decided the environment is correct, and "correct" has to mean GitHub holds
+# nothing the file did not put there.
+EXISTING_VARS_JSON="$(gh api "repos/${REPO}/environments/${ENV_NAME}/variables?per_page=100" --jq '[.variables[] | {name, value}]' 2>/dev/null || echo '[]')"
+EXISTING_VARS="$(jq -r '.[].name' <<<"$EXISTING_VARS_JSON")"
+report_var_drift
+
+if [ "${#refused[@]}" -gt 0 ]; then
+  echo >&2
+  echo "   ${#refused[@]} variable(s) were REFUSED and are not in GitHub:" >&2
+  printf '     %s\n' "${refused[@]}" >&2
+  echo "   Fix the value in $(basename "$VARS_FILE") and re-run." >&2
+  exit 1
+fi
 
 echo
 echo "Done. NODES, PB_URL, PB_BIND_IP, PB_DATA_DEVICE, PRIVATE_SUBNET, TUNNEL_TOKEN,"

@@ -1,5 +1,5 @@
 # Ephemeral full stack for the end-to-end suite (#126). Brings up the whole
-# system on one network — PocketBase + Valkey + worker + evaluator + web + the
+# system on one network — PocketBase + worker + evaluator + web + the
 # deterministic fixture target — so tests exercise the real worker -> evaluator
 # -> PocketBase pipeline, not mocks.
 #
@@ -10,16 +10,18 @@
 name: monitors-e2e
 
 services:
-  valkey:
-    image: valkey/valkey
-    healthcheck:
-      test: ['CMD', 'valkey-cli', 'ping']
-      interval: 3s
-      timeout: 3s
-      retries: 10
-
   pocketbase:
-    image: ghcr.io/muchobien/pocketbase:latest
+    # The SAME image production runs: built from deploy/pocketbase/Dockerfile at the
+    # version deploy/environments/production.vars pins (#613). It was a third-party
+    # :latest (0.40.4) while production ran 0.28.4, so e2e tested a PocketBase that
+    # behaved differently (#609's avatar download, #619's OAuth secret bug) and
+    # moved without a commit. setup.sh and Playwright's global setup export
+    # E2E_PB_VERSION; set it yourself to try an upgrade before production gets it.
+    build:
+      context: ../deploy/pocketbase
+      args:
+        PB_VERSION: ${E2E_PB_VERSION:?run through e2e/setup.sh, or export E2E_PB_VERSION=$(e2e/setup.sh pb-version)}
+    image: monitors-e2e-pocketbase:${E2E_PB_VERSION:?run through e2e/setup.sh, or export E2E_PB_VERSION=$(e2e/setup.sh pb-version)}
     # Ephemeral data: a named volume the teardown removes with `down -v`.
     volumes:
       - pb_data:/pb_data
@@ -30,6 +32,17 @@ services:
       interval: 3s
       timeout: 3s
       retries: 20
+
+  # Catches the account emails PocketBase sends (#627): verification, password
+  # reset, email change. SMTP on mail:1025 inside the stack; its API on the host
+  # lets a spec read a message and follow the link in it.
+  mail:
+    image: axllent/mailpit:v1.31.3
+    environment:
+      MP_SMTP_AUTH_ACCEPT_ANY: '1'
+      MP_SMTP_AUTH_ALLOW_INSECURE: '1'
+    ports:
+      - '${E2E_MAIL_PORT:-8025}:8025'
 
   fixture:
     build:
@@ -48,22 +61,88 @@ services:
     build:
       context: ..
       dockerfile: worker/dockerfile
+    # Named so the second zone can run the SAME image rather than building its
+    # own — two workers on different builds would make any divergence between
+    # them impossible to attribute.
+    image: monitors-e2e-worker:latest
     restart: unless-stopped
+    stop_grace_period: 30s
     depends_on:
-      valkey:
-        condition: service_healthy
       pocketbase:
         condition: service_healthy
     environment:
       - REGION_NAME=e2e
-      - CACHE_HOST=valkey
-      - CACHE_PORT=6379
       - PB_URL=http://pocketbase:8090
       - PB_AUTH_COLLECTION=service_accounts
       - PB_ADMIN_USERNAME=${E2E_WORKER_USERNAME:-worker@e2e.local}
       - PB_ADMIN_PASSWORD=${E2E_WORKER_PASSWORD:-worker-e2e-pass}
       # Health HTTP server off — the e2e assertions use the data pipeline, not it.
       - HEALTH_ADDR=off
+      # A tempo a test can watch. The deployed worker beats every 10s and holds a
+      # 45s roster TTL, so every takeover assertion would otherwise sleep 45
+      # seconds of real time — four times over, in one spec. Unset in production.
+      - WORKER_HEARTBEAT_INTERVAL=1
+      - WORKER_RECONCILE_INTERVAL=2
+      - WORKER_STATS_INTERVAL=1
+      - WORKER_ROSTER_TTL=4
+      # Blank so every replica takes its own container hostname as its worker id:
+      # `--scale worker=3` must produce three DISTINCT ids or they would claim one
+      # roster position between them. The sharding spec scales this service.
+      - WORKER_ID=
+      # The "is it us?" probe after a failed check (#598): the fixture's canary,
+      # which a spec can switch down to play a worker whose network is gone.
+      - WORKER_CANARY_URLS=http://fixture:8080/canary
+
+  # The anonymous "try it free" zone (#522): checks anon_monitors only. Always on,
+  # because the landing page's try form depends on it — production runs one on
+  # the evaluator host.
+  worker-free:
+    image: monitors-e2e-worker:latest
+    restart: unless-stopped
+    stop_grace_period: 30s
+    depends_on:
+      pocketbase:
+        condition: service_healthy
+    environment:
+      - REGION_NAME=free
+      - PB_URL=http://pocketbase:8090
+      - PB_AUTH_COLLECTION=service_accounts
+      - PB_ADMIN_USERNAME=${E2E_WORKER_USERNAME:-worker@e2e.local}
+      - PB_ADMIN_PASSWORD=${E2E_WORKER_PASSWORD:-worker-e2e-pass}
+      - HEALTH_ADDR=off
+      - WORKER_RECONCILE_INTERVAL=2
+      # OFF here only: the fixture the journey tries lives on this private compose
+      # network, which the SSRF guard exists to refuse. Production keeps it on
+      # (remote-deploy.sh sets it for the free zone).
+      - BLOCK_PRIVATE_TARGETS=false
+
+  # A second zone, off by default (`--profile zone2`). It exists so the sharding
+  # spec can kill an entire zone — proving a zone reads dead only when all of its
+  # workers are — without touching the zone every other spec depends on.
+  worker-b:
+    profiles: ['zone2']
+    # No build: it runs the image the `worker` service built during setup.
+    image: monitors-e2e-worker:latest
+    restart: unless-stopped
+    stop_grace_period: 30s
+    depends_on:
+      pocketbase:
+        condition: service_healthy
+    environment:
+      - REGION_NAME=e2e-b
+      - PB_URL=http://pocketbase:8090
+      - PB_AUTH_COLLECTION=service_accounts
+      - PB_ADMIN_USERNAME=${E2E_WORKER_USERNAME:-worker@e2e.local}
+      - PB_ADMIN_PASSWORD=${E2E_WORKER_PASSWORD:-worker-e2e-pass}
+      - HEALTH_ADDR=off
+      # A tempo a test can watch. The deployed worker beats every 10s and holds a
+      # 45s roster TTL, so every takeover assertion would otherwise sleep 45
+      # seconds of real time — four times over, in one spec. Unset in production.
+      - WORKER_HEARTBEAT_INTERVAL=1
+      - WORKER_RECONCILE_INTERVAL=2
+      - WORKER_STATS_INTERVAL=1
+      - WORKER_ROSTER_TTL=4
+      - WORKER_ID=
 
   evaluator:
     build:
@@ -81,19 +160,29 @@ services:
       # Fast dead-man threshold so zone-silence tests don't wait long.
       - DEADMAN_SECONDS=30
       - HEALTH_ADDR=off
+      # Minted by setup.sh (#602); the push channel test posts to the fixture.
+      - VAPID_PUBLIC_KEY=${E2E_VAPID_PUBLIC_KEY:-}
+      - VAPID_PRIVATE_KEY=${E2E_VAPID_PRIVATE_KEY:-}
 
   web:
     build:
       context: ..
       dockerfile: app/dockerfile
+      args:
+        GIT_COMMIT: ${GIT_COMMIT:-}
+        # Must match Playwright's baseURL host exactly, or SvelteKit's CSRF guard
+        # rejects the sign-in POST (127.0.0.1 != localhost). A BUILD arg since
+        # SvelteKit 3: adapter-node no longer reads ORIGIN at runtime, it is baked
+        # in as paths.origin (app/vite.config.ts).
+        ORIGIN: http://127.0.0.1:${E2E_WEB_PORT:-4390}
     restart: unless-stopped
     depends_on:
       pocketbase:
         condition: service_healthy
     environment:
       - PB_URL=http://pocketbase:8090
-      # Must match Playwright's baseURL host exactly, or SvelteKit's CSRF guard
-      # rejects the sign-in POST (127.0.0.1 != localhost).
+      # Ignored by adapter-node 6 (see the build arg above); kept for anything
+      # that still reads it.
       - ORIGIN=http://127.0.0.1:${E2E_WEB_PORT:-4390}
       - HOST=0.0.0.0
       - PORT=3000
@@ -101,6 +190,9 @@ services:
       - WEB_PB_COLLECTION=service_accounts
       - WEB_PB_USERNAME=${E2E_WORKER_USERNAME:-worker@e2e.local}
       - WEB_PB_PASSWORD=${E2E_WORKER_PASSWORD:-worker-e2e-pass}
+      # Seeded by setup.sh; the shared dashboard user is deliberately not an admin.
+      - ADMIN_EMAILS=${E2E_ADMIN_EMAIL:-staff@e2e.local}
+      - VAPID_PUBLIC_KEY=${E2E_VAPID_PUBLIC_KEY:-}
     ports:
       - '${E2E_WEB_PORT:-4390}:3000'
 

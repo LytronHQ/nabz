@@ -9,7 +9,11 @@ import {
 	parseHeaders,
 	headersToLines,
 	toWindows
-} from '$lib/models/monitor';
+} from '#lib/models/monitor.js';
+
+// Raw input as a form or record would hand it over (e.g. tags as one
+// comma-separated string), which the constructor must normalise.
+const rawMonitor = (data: object) => data as ConstructorParameters<typeof MonitorNewItem>[0];
 
 test('every supported type is a valid monitor type', () => {
 	for (const t of SupportedMonitorTypes) {
@@ -178,12 +182,12 @@ test('tags parse from an array or a comma-separated string', () => {
 			tags: ['prod', 'db']
 		}).tags
 	).toEqual(['prod', 'db']);
-	expect(new MonitorNewItem({ tags: 'prod, db ,  , api' } as any).tags).toEqual([
+	expect(new MonitorNewItem(rawMonitor({ tags: 'prod, db ,  , api' })).tags).toEqual([
 		'prod',
 		'db',
 		'api'
 	]);
-	expect(new MonitorNewItem({} as any).tags).toEqual([]);
+	expect(new MonitorNewItem(rawMonitor({})).tags).toEqual([]);
 });
 
 test('latency threshold: config round-trip + positive validation', () => {
@@ -249,10 +253,10 @@ test('toMonitorConfig persists non-default DNS options only', () => {
 		dnsExpectedValue: 'aspmx.l.google.com',
 		dnsResolver: '8.8.8.8'
 	});
-	const cfg = toMonitorConfig(item) as any;
-	expect(cfg.dnsRecordType).toBe('MX');
-	expect(cfg.dnsExpectedValue).toBe('aspmx.l.google.com');
-	expect(cfg.dnsResolver).toBe('8.8.8.8');
+	const cfg = toMonitorConfig(item);
+	expect(cfg?.dnsRecordType).toBe('MX');
+	expect(cfg?.dnsExpectedValue).toBe('aspmx.l.google.com');
+	expect(cfg?.dnsResolver).toBe('8.8.8.8');
 	// The default A record type is not persisted.
 	const a = new MonitorNewItem({
 		name: 'DNS',
@@ -261,5 +265,5 @@ test('toMonitorConfig persists non-default DNS options only', () => {
 		interval: 60,
 		dnsRecordType: 'A'
 	});
-	expect((toMonitorConfig(a) as any)?.dnsRecordType).toBeUndefined();
+	expect(toMonitorConfig(a)?.dnsRecordType).toBeUndefined();
 });

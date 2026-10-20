@@ -54,7 +54,7 @@ command of `ADAPTER=cloudflare npm run build`, and a deploy command of
 | Where | What |
 |-------|------|
 | `app/wrangler.toml` `[vars]` | **non-secret** runtime env: `PB_URL`, `WEB_PB_COLLECTION`, `HEALTH_STALE_SECONDS` |
-| Worker secrets (pushed by `deploy-web`) | `PKCE_FLOW_ENCRYPTION_KEY`, `WEB_PB_USERNAME`, `WEB_PB_PASSWORD`, `HEALTH_DEBUG_TOKEN`, `ADMIN_EMAILS`, `CF_ACCESS_CLIENT_ID`, `CF_ACCESS_CLIENT_SECRET` |
+| Worker secrets (pushed by `deploy-web`) | `PKCE_FLOW_ENCRYPTION_KEY`, `WEB_PB_USERNAME`, `WEB_PB_PASSWORD`, `HEALTH_DEBUG_TOKEN`, `ADMIN_EMAILS`, `CF_ACCESS_CLIENT_ID`, `CF_ACCESS_CLIENT_SECRET`, `VAPID_PUBLIC_KEY` |
 
 Values come from Bitwarden Secrets Manager via the environment's GitHub secrets;
 rotating one means updating BWS, running `setup-env.sh`, then `deploy-web`.
@@ -75,15 +75,52 @@ comes in via a Cloudflare Tunnel behind Access. Avatars are proxied through
 `infra-tunnel` and `infra-access` create all of it — tunnel, ingress, DNS, Access
 application, Service Auth policy, service token — and store the results as
 environment secrets. Nothing here is a dashboard procedure any more; the scripts
-they run are [`tunnel.sh`](tunnel.sh) and [`access.sh`](access.sh), both
-idempotent and runnable by hand with the same env vars.
+they run are `edge.sh tunnel` and `edge.sh access`, both
+idempotent and runnable by hand.
+
+`edge.sh` comes from the `edge` module of
+[LytronHQ/ops](https://github.com/LytronHQ/ops), pinned in
+[`../ops.lock`](../ops.lock) — **do not edit them here**; `deploy/ops_vendor_test.sh`
+fails if you do. Every input is a flag and nothing is read from the environment,
+so a run by hand looks like the workflow's:
+
+```bash
+printf '%s' "$CF_API_TOKEN" | ./deploy/.ops/edge.sh access \
+  --hostname pb.nabz.sh --account-id "$CF_ACCOUNT_ID" --api-token-file - \
+  --app-name nabz-pocketbase --policy-name worker-service-token \
+  --token nabz-pocketbase-worker
+```
+
+The token name and the policy name are **not** free choices. The module would
+happily accept others, and each one would mint a *new* token beside the live one
+rather than reusing it — and Cloudflare returns a service-token secret only at
+creation, so the live credential would become unrecoverable. `access_test.sh`
+pins both names for that reason.
+
+It prints `CF_ACCESS_CLIENT_ID_<NAME>`, where `<NAME>` is the token name
+upper-cased with everything outside `A-Z0-9` turned into `_`.
+[`token-var.sh`](token-var.sh) computes it, so the workflow and `fly-token.sh`
+do not each carry their own copy of that rule.
 
 Two things those scripts encode that are easy to get wrong by hand: the tunnel
 ingress must be **HTTP** to the node's **private** IP (the hop is inside the
 private network and PocketBase serves plain HTTP), and the Access policy must be
 `non_identity` — an `allow` policy would also admit browser identity flows,
-which is a second door. `access.sh` refuses to proceed if any other policy exists
+which is a second door. `edge.sh access` refuses to proceed if any other policy exists
 on the application, because Access ORs them.
+
+`edge.sh tunnel` also **refuses** to replace a DNS record for the hostname that is not
+already this tunnel's — an `A` record pointing at a real server, say. The copy this
+replaced overwrote it silently. A record that already points at this tunnel is not
+foreign, so an ordinary re-run needs nothing; `--replace-dns` is for when you mean it.
+
+Two names are passed explicitly and are **not** free choices: `--name` (the module
+defaults it to the hostname, and a different name creates a *second* tunnel beside
+the live one) and the origin, which must be the container name `http://pocketbase:8090`.
+The host's private address looks equivalent and is not: that traffic leaves the
+connector's container from the Docker bridge and meets the host firewall, which
+allows only the private subnet to :8090 — every request times out while PocketBase
+answers fine from the host. `infra_tunnel_workflow_test.sh` pins both.
 
 Rotating the service token is `infra-access` with `rotate_token: true`, then
 `deploy-web`. Cloudflare only returns a token's secret at creation, so a plain

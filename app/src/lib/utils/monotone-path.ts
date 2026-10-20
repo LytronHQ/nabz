@@ -31,9 +31,7 @@ export type Segment = {
  *  Points sharing an x are dropped: a zero-width interval has an infinite slope,
  *  and two checks can land in the same millisecond. */
 export function monotoneSegments(points: readonly Point[]): Segment[] {
-	const p = points.filter(
-		(pt, i) => i === 0 || pt.x > points[i - 1].x
-	);
+	const p = points.filter((pt, i) => i === 0 || pt.x > points[i - 1].x);
 	const n = p.length;
 	if (n < 2) return [];
 
@@ -96,7 +94,8 @@ const f = (v: number) => v.toFixed(1);
 export function forwardPath(segs: readonly Segment[]): string {
 	if (!segs.length) return '';
 	let d = `M${f(segs[0].x0)} ${f(segs[0].y0)}`;
-	for (const s of segs) d += ` C${f(s.c1x)} ${f(s.c1y)} ${f(s.c2x)} ${f(s.c2y)} ${f(s.x1)} ${f(s.y1)}`;
+	for (const s of segs)
+		d += ` C${f(s.c1x)} ${f(s.c1y)} ${f(s.c2x)} ${f(s.c2y)} ${f(s.x1)} ${f(s.y1)}`;
 	return d;
 }
 

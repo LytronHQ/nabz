@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { Pill, type PillTone } from '$lib/components/common/pill';
+	import { Pill, type PillTone } from '#lib/components/common/pill/index.js';
 
 	interface Props {
 		status?: string;
@@ -19,6 +19,8 @@
 		pending: { label: 'Pending', tone: 'pending' },
 		paused: { label: 'Paused', tone: 'paused' },
 		'rate-limited': { label: 'Rate-limited', tone: 'rate-limited' },
+		// A failure nabz blamed on its own worker's network (#598).
+		'not-counted': { label: 'Not counted', tone: 'paused' },
 		maintenance: { label: 'Maintenance', tone: 'maintenance' }
 	};
 

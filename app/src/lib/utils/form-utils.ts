@@ -1,6 +1,6 @@
-import type ApiError from '$lib/models/api-error';
-import { pushToast } from '$lib/stores/toast-store';
-import { fieldErrorsFrom, isValidationError, friendlyMessage } from '$lib/utils/api-error-utils';
+import type ApiError from '#lib/models/api-error.js';
+import { pushToast } from '#lib/stores/toast-store.js';
+import { fieldErrorsFrom, isValidationError, friendlyMessage } from '#lib/utils/api-error-utils.js';
 
 /**
  * Route a failed save (#167): a 400 validation error becomes inline field errors

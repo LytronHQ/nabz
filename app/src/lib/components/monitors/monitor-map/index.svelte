@@ -24,6 +24,7 @@
 	import { select, pointer } from 'd3-selection';
 	import { zoom as d3zoom, zoomIdentity, type ZoomTransform } from 'd3-zoom';
 	import { drag as d3drag } from 'd3-drag';
+	import { fitTransform } from '#lib/utils/fit-view.js';
 
 	type Mon = {
 		id: string;
@@ -52,9 +53,11 @@
 		fx?: number | null;
 		fy?: number | null;
 	};
-	// d3-force mutates source/target from ids to node objects in place, so they're
-	// `any` here (avoids casts in the template, which Svelte's parser rejects).
-	type Link = { source: any; target: any };
+	// d3-force mutates source/target from ids to node objects in place.
+	type Link = { source: string | Node; target: string | Node };
+	// A link endpoint once the simulation has resolved it to its node. A function
+	// rather than a cast in the template, which Svelte's parser rejects.
+	const nodeOf = (endpoint: string | Node) => endpoint as Node;
 
 	let svgEl: SVGSVGElement | undefined = $state();
 	let width = $state(900);
@@ -67,6 +70,11 @@
 	let sim: Simulation<Node, Link> | null = $state(null);
 	let hovered: string | null = $state(null);
 	let dragMoved = false;
+	// Until the user pans, zooms or drags, the view keeps refitting while the layout
+	// settles, so every node is on screen whatever the canvas width.
+	let userMoved = false;
+	let hudHeight = $state(40);
+	let zoomer: ReturnType<typeof d3zoom<SVGSVGElement, unknown>> | null = null;
 	let hideTimer: ReturnType<typeof setTimeout> | undefined;
 
 	// #280 controls.
@@ -165,12 +173,14 @@
 			.on('tick', () => {
 				nodes = nodes;
 				links = links;
+				if (!userMoved) fitView();
 			});
 	}
 
 	function setSpread(s: 'compact' | 'wide') {
 		if (s === spread) return;
 		spread = s;
+		userMoved = false;
 		start();
 	}
 
@@ -178,6 +188,7 @@
 	$effect(() => {
 		const key = mode + '|' + monitors.map((m) => m.id).join(',');
 		if (sim && key !== lastKey) {
+			if (key.split('|')[0] !== lastKey.split('|')[0]) userMoved = false;
 			lastKey = key;
 			start();
 		}
@@ -218,10 +229,13 @@
 	}
 
 	onMount(() => {
-		const z = d3zoom<SVGSVGElement, unknown>()
+		zoomer = d3zoom<SVGSVGElement, unknown>()
 			.scaleExtent([0.25, 4])
-			.on('zoom', (e) => (tf = e.transform));
-		select(svgEl!).call(z);
+			.on('zoom', (e) => {
+				if (e.sourceEvent) userMoved = true;
+				tf = e.transform;
+			});
+		select(svgEl!).call(zoomer);
 		lastKey = mode + '|' + monitors.map((m) => m.id).join(',');
 		start();
 	});
@@ -238,6 +252,7 @@
 			.on('start', (e) => {
 				e.sourceEvent.stopPropagation();
 				dragMoved = false;
+				userMoved = true;
 				if (!e.active) sim?.alphaTarget(0.3).restart();
 				n.fx = n.x;
 				n.fy = n.y;
@@ -289,9 +304,31 @@
 			: null
 	);
 
+	// Hub labels sit above (14px), monitor name + uptime below (10px, truncated).
+	function fitView() {
+		if (!svgEl || !zoomer) return;
+		const t = fitTransform(
+			nodes.map((n) =>
+				n.kind === 'hub'
+					? { x: n.x ?? 0, y: n.y ?? 0, r: n.r, hw: n.label.length * 4.2, above: n.r + 20 }
+					: {
+							x: n.x ?? 0,
+							y: n.y ?? 0,
+							r: n.r,
+							hw: truncate(n.label).length * 3,
+							below: n.r + 26
+						}
+			),
+			width,
+			height,
+			{ pad: 16, top: hudHeight + 10 }
+		);
+		select(svgEl).call(zoomer.transform, zoomIdentity.translate(t.x, t.y).scale(t.k));
+	}
+
 	function resetView() {
-		tf = zoomIdentity;
-		if (svgEl) select(svgEl).call((d3zoom() as any).transform, zoomIdentity);
+		userMoved = false;
+		fitView();
 	}
 </script>
 
@@ -300,48 +337,56 @@
 		{#if monitors.length === 0}
 			<div class="empty">No monitors to map yet.</div>
 		{:else}
-			<div class="legend">
-				<span><i style="background:var(--status-up)"></i>up</span>
-				<span><i style="background:var(--status-down)"></i>down</span>
-				<span><i style="background:var(--status-pending)"></i>pending</span>
-				<span><i style="background:var(--status-paused)"></i>paused</span>
-				<span class="hub-key">
-					<svg class="hicon" viewBox="0 0 24 24" aria-hidden="true">
-						{#if mode === 'tag'}
-							<path
-								d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"
-							/>
-							<line x1="7" y1="7" x2="7.01" y2="7" />
-						{:else}
-							<circle cx="12" cy="12" r="10" />
-							<line x1="2" y1="12" x2="22" y2="12" />
-							<path
-								d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"
-							/>
-						{/if}
-					</svg>{mode === 'tag' ? 'tag' : 'domain'}</span
-				>
-			</div>
-
-			<div class="controls">
-				<input
-					class="search"
-					type="search"
-					placeholder="Search monitors…"
-					aria-label="Search monitors"
-					bind:value={search}
-				/>
-				<span class="counter" title="rendered nodes (monitors + hubs)">
-					{nodes.length} node{nodes.length === 1 ? '' : 's'}{#if matchIds}
-						· {matchCount} match{/if}
-				</span>
-				<div class="seg small" role="group" aria-label="Layout spread">
-					<button class:on={spread === 'compact'} onclick={() => setSpread('compact')}
-						>Compact</button
+			<div class="hud" bind:clientHeight={hudHeight}>
+				<div class="legend">
+					<span><i style="background:var(--status-up)"></i>up</span>
+					<span><i style="background:var(--status-down)"></i>down</span>
+					<span><i style="background:var(--status-pending)"></i>pending</span>
+					<span><i style="background:var(--status-paused)"></i>paused</span>
+					<span class="hub-key">
+						<svg class="hicon" viewBox="0 0 24 24" aria-hidden="true">
+							{#if mode === 'tag'}
+								<path
+									d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"
+								/>
+								<line x1="7" y1="7" x2="7.01" y2="7" />
+							{:else}
+								<circle cx="12" cy="12" r="10" />
+								<line x1="2" y1="12" x2="22" y2="12" />
+								<path
+									d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"
+								/>
+							{/if}
+						</svg>{mode === 'tag' ? 'tag' : 'domain'}</span
 					>
-					<button class:on={spread === 'wide'} onclick={() => setSpread('wide')}>Wide</button>
 				</div>
-				<button type="button" class="reset" onclick={resetView}>Reset</button>
+
+				<div class="controls">
+					<input
+						class="search"
+						type="search"
+						placeholder="Search monitors…"
+						aria-label="Search monitors"
+						bind:value={search}
+					/>
+					<span class="counter" title="rendered nodes (monitors + hubs)">
+						{nodes.length} node{nodes.length === 1 ? '' : 's'}{#if matchIds}
+							· {matchCount} match{/if}
+					</span>
+					<div class="seg small" role="group" aria-label="Layout spread">
+						<button
+							class:on={spread === 'compact'}
+							aria-pressed={spread === 'compact'}
+							onclick={() => setSpread('compact')}>Compact</button
+						>
+						<button
+							class:on={spread === 'wide'}
+							aria-pressed={spread === 'wide'}
+							onclick={() => setSpread('wide')}>Wide</button
+						>
+					</div>
+					<button type="button" class="reset" onclick={resetView}>Reset</button>
+				</div>
 			</div>
 
 			<svg bind:this={svgEl} {width} {height} role="img" aria-label="Monitor map">
@@ -349,10 +394,10 @@
 					{#each links as l, i (i)}
 						<line
 							class="edge"
-							x1={l.source.x}
-							y1={l.source.y}
-							x2={l.target.x}
-							y2={l.target.y}
+							x1={nodeOf(l.source).x}
+							y1={nodeOf(l.source).y}
+							x2={nodeOf(l.target).x}
+							y2={nodeOf(l.target).y}
 							opacity={dimEdge(l) ? 0.1 : 1}
 						/>
 					{/each}
@@ -413,7 +458,6 @@
 	</div>
 
 	{#if hoveredMon && popupXY}
-		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<div
 			class="popup"
 			style="left:{popupXY[0]}px; top:{popupXY[1]}px"
@@ -577,12 +621,28 @@
 	.popup-link:hover {
 		text-decoration: underline;
 	}
-	.legend {
+	/* One row for the legend and the controls, wrapping when the canvas is narrow.
+	   Both were pinned to opposite corners on their own, so on a phone the search
+	   box sat on top of "pending · paused · tag". */
+	.hud {
 		position: absolute;
 		top: 10px;
 		left: 12px;
+		right: 12px;
 		z-index: 1;
 		display: flex;
+		flex-wrap: wrap;
+		justify-content: space-between;
+		align-items: flex-start;
+		gap: 8px;
+		pointer-events: none;
+	}
+	.hud > * {
+		pointer-events: auto;
+	}
+	.legend {
+		display: flex;
+		flex-wrap: wrap;
 		align-items: center;
 		gap: 12px;
 		font-size: 12.5px;
@@ -614,10 +674,6 @@
 	}
 	/* Top-right control cluster: search, counter, layout toggle, reset. */
 	.controls {
-		position: absolute;
-		top: 10px;
-		right: 12px;
-		z-index: 1;
 		display: flex;
 		align-items: center;
 		gap: 8px;

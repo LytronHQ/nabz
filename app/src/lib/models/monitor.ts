@@ -1,6 +1,6 @@
-import type { ListResult, RecordModel } from 'pocketbase';
+import type { ListResult } from 'pocketbase';
 import { z } from 'zod';
-import { type EntityIdType } from '$lib/constants';
+import { type EntityIdType } from '#lib/constants.js';
 import { type IBaseEntity, BaseEntityList, BaseEntityValidator, PaginationData } from './';
 
 export const MonitorTypes = ['website', 'ping', 'port', 'heartbeat', 'duplicati', 'dns'] as const;
@@ -46,7 +46,73 @@ export function headersToLines(headers: Record<string, string> | undefined | nul
 		.join('\n');
 }
 
-function toPositiveInt(value: any): number | null {
+// What the constructors and toMonitorConfig read from: a PocketBase record
+// (snake_case columns, HTTP/DNS options nested in `config`), a MonitorItem or
+// MonitorNewItem being copied, or flat form fields (where every value arrives as
+// a string). The helpers below coerce each field, so the scalar ones stay loose.
+type Loose = string | number | boolean | null | undefined;
+
+export interface MonitorConfigInput {
+	keyword?: string;
+	keywordMode?: string;
+	method?: string;
+	headers?: Record<string, string>;
+	expectedStatus?: Loose;
+	followRedirects?: boolean;
+	timeoutSecs?: Loose;
+	maintenanceWindows?: unknown;
+	latencyThresholdMs?: Loose;
+	dnsRecordType?: string;
+	dnsExpectedValue?: string;
+	dnsResolver?: string;
+}
+
+export interface MonitorInput {
+	id?: EntityIdType;
+	name?: string;
+	type?: MonitorType;
+	target?: string;
+	token?: string;
+	interval?: Loose;
+	enabled?: boolean;
+	zones?: unknown;
+	tags?: unknown;
+	escalation_policy?: string;
+	escalationPolicy?: string;
+	config?: MonitorConfigInput | null;
+	keyword?: string;
+	keywordMode?: string;
+	method?: string;
+	headers?: string;
+	expectedStatus?: Loose;
+	followRedirects?: Loose;
+	timeoutSecs?: Loose;
+	maintenanceWindows?: unknown;
+	latencyThresholdMs?: Loose;
+	dnsRecordType?: string;
+	dnsExpectedValue?: string;
+	dnsResolver?: string;
+	status?: MonitorStatus;
+	consensus_zones?: unknown;
+	consensusZones?: unknown;
+	consensus_fresh?: unknown;
+	consensusFresh?: unknown;
+	last_checked?: string | null;
+	lastChecked?: string | null;
+	uptime24h?: Loose;
+	cert_expires_at?: string | null;
+	certExpiresAt?: string | null;
+	domain_expires_at?: string | null;
+	domainExpiresAt?: string | null;
+	lastDowntime?: string | null;
+	last_downtime?: string | null;
+}
+
+function toInput(data: FormData | MonitorInput | null | undefined): MonitorInput {
+	return data instanceof FormData ? (Object.fromEntries(data) as MonitorInput) : (data ?? {});
+}
+
+function toPositiveInt(value: unknown): number | null {
 	const n = Number(value);
 	return Number.isFinite(n) && n > 0 ? Math.trunc(n) : null;
 }
@@ -54,7 +120,7 @@ function toPositiveInt(value: any): number | null {
 // Assemble the monitor `config` JSON from the flat form fields, or null when
 // nothing non-default is set. Every field is omitted at its default so an unset
 // config keeps the original behaviour (GET, 200–399 = up, follow redirects).
-export function toMonitorConfig(item: any): Record<string, unknown> | null {
+export function toMonitorConfig(item: MonitorInput): Record<string, unknown> | null {
 	const cfg: Record<string, unknown> = {};
 
 	if (item.keywordMode === 'contains' || item.keywordMode === 'absent') {
@@ -182,16 +248,16 @@ const schema = z
 
 export type IMonitorItem = z.infer<typeof schema>;
 
-function toInterval(value: any): number {
+function toInterval(value: unknown): number {
 	const n = Number(value);
 	return Number.isFinite(n) ? Math.trunc(n) : 60;
 }
 
-function toBool(value: any): boolean {
+function toBool(value: unknown): boolean {
 	return value === true || value === 'true' || value === 1 || value === '1';
 }
 
-function toZones(value: any): string[] {
+function toZones(value: unknown): string[] {
 	if (Array.isArray(value)) return value.filter(Boolean);
 	if (typeof value === 'string')
 		return value
@@ -201,7 +267,7 @@ function toZones(value: any): string[] {
 	return [];
 }
 
-function toNumberOrNull(value: any): number | null {
+function toNumberOrNull(value: unknown): number | null {
 	if (value === undefined || value === null || value === '') return null;
 	const n = Number(value);
 	return Number.isFinite(n) ? n : null;
@@ -211,7 +277,7 @@ export type MaintenanceWindow = { start: string; end: string };
 
 // Accept maintenance windows as an array (API record) or a JSON string (round-
 // tripped through FormData); keep only entries with both a start and an end.
-export function toWindows(value: any): MaintenanceWindow[] {
+export function toWindows(value: unknown): MaintenanceWindow[] {
 	let arr = value;
 	if (typeof value === 'string' && value.trim()) {
 		try {
@@ -226,7 +292,7 @@ export function toWindows(value: any): MaintenanceWindow[] {
 
 // Read the HTTP-option fields from either an API record (nested `config` object)
 // or flat form fields, defaulting each to its original behaviour when unset.
-function configFields(item: any) {
+function configFields(item: MonitorInput) {
 	const c = item.config;
 	return {
 		keyword: c?.keyword ?? item.keyword ?? '',
@@ -294,8 +360,8 @@ export class MonitorItem implements IBaseEntity {
 	// Heartbeat check-in token (empty for probed types); used to build the /ping URL.
 	token: string;
 
-	constructor(data: FormData | RecordModel | any) {
-		const item = data instanceof FormData ? Object.fromEntries(data) : (data ?? {});
+	constructor(data: FormData | MonitorInput | null | undefined) {
+		const item = toInput(data);
 		this.id = item.id;
 		this.name = item.name ?? '';
 		this.type = item.type ?? 'website';
@@ -355,9 +421,9 @@ export class MonitorNewItem {
 	dnsExpectedValue: string;
 	dnsResolver: string;
 
-	constructor(data: FormData | RecordModel | any = null) {
+	constructor(data: FormData | MonitorInput | null = null) {
 		const fromForm = data instanceof FormData;
-		const item = fromForm ? Object.fromEntries(data) : (data ?? {});
+		const item = toInput(data);
 		this.name = item.name ?? '';
 		this.type = item.type ?? 'website';
 		this.target = item.target ?? '';
@@ -389,8 +455,7 @@ export class MonitorItemValidator extends BaseEntityValidator {
 }
 
 export class MonitorsList extends BaseEntityList<MonitorItem> {
-	constructor(data: MonitorsList);
-	constructor(data: ListResult<RecordModel> | any) {
+	constructor(data: MonitorsList | Partial<ListResult<MonitorInput>> | null | undefined) {
 		// Guard against the uninitialised shared store (`{}`), which has no
 		// `.items`: on the monitor detail page `store.edit()` updates this store
 		// before the list page has ever populated it — without the guard
@@ -398,19 +463,19 @@ export class MonitorsList extends BaseEntityList<MonitorItem> {
 		super(
 			data instanceof MonitorsList
 				? data.items
-				: (data?.items ?? []).map((it: any) => new MonitorItem(it)),
+				: (data?.items ?? []).map((it) => new MonitorItem(it)),
 			data instanceof MonitorsList
 				? new PaginationData(data.pagination)
 				: new PaginationData(data ?? {})
 		);
 	}
 
-	add(item: any) {
+	add(item: MonitorInput) {
 		super.add(new MonitorItem(item));
 		return this;
 	}
 
-	edit(item: any) {
+	edit(item: MonitorInput) {
 		super.edit(new MonitorItem(item));
 		return this;
 	}

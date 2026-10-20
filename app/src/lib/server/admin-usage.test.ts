@@ -67,3 +67,36 @@ describe('getFleetOps live worker count (#311)', () => {
 		expect(zone.workers).toBe(0);
 	});
 });
+
+describe('getFleetOps health thresholds (#611)', () => {
+	// Real time, so the old signature (no clock argument) is judged on the same clock.
+	const now = Date.now();
+	const ago = (s: number) => new Date(now - s * 1000).toISOString().replace('T', ' ');
+	const pbWith = (rows: Record<string, unknown>[]) =>
+		({ collection: () => ({ getFullList: async () => rows }) }) as unknown as Parameters<
+			typeof getFleetOps
+		>[0];
+	const limits = { staleMs: 90_000, webStaleMs: 300_000 };
+
+	it('keeps the web healthy between its 2-minute cron beats', async () => {
+		// The web beats every 2 minutes. A flat 30 s threshold showed it "Stale" for
+		// most of every cycle while /api/health said ok.
+		const [web] = await getFleetOps(pbWith([{ zone: 'web', updated: ago(130) }]), limits, now);
+		expect(web.healthy).toBe(true);
+	});
+
+	it('still marks the web stale once it misses its window', async () => {
+		const [web] = await getFleetOps(pbWith([{ zone: 'web', updated: ago(301) }]), limits, now);
+		expect(web.healthy).toBe(false);
+	});
+
+	it('judges workers and the evaluator on the shorter health window', async () => {
+		const rows = [
+			{ zone: 'eu-central', updated: ago(60) },
+			{ zone: 'evaluator', updated: ago(120) }
+		];
+		const [zone, evaluator] = await getFleetOps(pbWith(rows), limits, now);
+		expect(zone.healthy).toBe(true);
+		expect(evaluator.healthy).toBe(false);
+	});
+});

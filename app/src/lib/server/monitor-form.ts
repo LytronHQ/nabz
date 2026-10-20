@@ -1,10 +1,10 @@
 import type PocketBase from 'pocketbase';
-import { env } from '$env/dynamic/private';
-import { EVALUATOR_ZONE, WEB_ZONE, parsePbTime } from '$lib/server/health';
-import { getZones, fallbackZone } from '$lib/server/zones';
+import { HEALTH_STALE_SECONDS } from '$app/env/private';
+import { EVALUATOR_ZONE, WEB_ZONE, parsePbTime } from '#lib/server/health.js';
+import { getZones, fallbackZone } from '#lib/server/zones.js';
 
 /** Same window /api/health judges a zone by, so the two never disagree. */
-const STALE_MS = (Number(env.HEALTH_STALE_SECONDS) || 90) * 1000;
+const STALE_MS = (Number(HEALTH_STALE_SECONDS) || 90) * 1000;
 
 // Zone names and escalation policies offered by the Add/Edit monitor form (#143).
 // Both the New and the Edit pages server-load these so the selects are populated
@@ -29,8 +29,8 @@ export async function loadMonitorFormOptions(pb: PocketBase, userId: string) {
 	// the choice was made, only silence afterwards.
 	const now = Date.now();
 	const seen = new Set<string>();
-	const availableZones = zoneRes.items
-		// Reserved liveness rows, not probe regions — see health.ts.
+
+	const availableZones = zoneRes.items // Reserved liveness rows, not probe regions — see health.ts.
 		.filter((z) => z.zone && z.zone !== EVALUATOR_ZONE && z.zone !== WEB_ZONE)
 		.filter((z) => (seen.has(z.zone) ? false : (seen.add(z.zone), true)))
 		.map((z) => {

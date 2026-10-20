@@ -1,5 +1,5 @@
 import { error, type RequestHandler } from '@sveltejs/kit';
-import { accessHeaders } from '$lib/server/pb-client';
+import { accessHeaders } from '#lib/server/pb-client.js';
 
 // Serves the signed-in user's own avatar (#338).
 //

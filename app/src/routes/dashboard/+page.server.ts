@@ -6,7 +6,7 @@ import {
 	scheduledCheckRate,
 	getZoneStats,
 	getOpenIncidents
-} from '$lib/server/dashboard';
+} from '#lib/server/dashboard.js';
 
 export const load: PageServerLoad = async ({ locals }) => {
 	if (!locals.user) {

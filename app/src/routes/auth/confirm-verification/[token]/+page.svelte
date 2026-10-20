@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
 	import type { PageData } from './$types';
-	import { Alert, Meta } from '$lib/components/common';
+	import { Alert, AuthCard, Meta } from '#lib/components/common/index.js';
 
 	interface Props {
 		data: PageData;
@@ -12,17 +12,11 @@
 
 <Meta title="Account Confirmation" />
 
-<div class="max-w-sm mx-auto mt-8">
-	{#if data}
-		{#if data.message}
-			<Alert tone={data.success ? 'success' : 'error'}>
-				{data.message}
-			</Alert>
-		{/if}
+<AuthCard title="Account confirmation">
+	{#if data?.message}
+		<Alert tone={data.success ? 'success' : 'error'}>
+			{data.message}
+		</Alert>
 	{/if}
-	<p class="text-gray-500 dark:text-gray-400">
-		<a href={resolve('/signin')} class="text-primary-600 hover:underline dark:text-primary-500">
-			Go back to login
-		</a>
-	</p>
-</div>
+	<p class="auth-alt"><a href={resolve('signin')}>Back to sign in</a></p>
+</AuthCard>

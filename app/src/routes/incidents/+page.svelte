@@ -1,14 +1,14 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
 	import { onMount } from 'svelte';
-	import { invalidateAll, goto } from '$app/navigation';
-	import { usePoll } from '$lib/utils/use-poll';
-	import { navigating } from '$app/stores';
+	import { refreshAll, goto } from '$app/navigation';
+	import { usePoll } from '#lib/utils/use-poll.js';
+	import { navigating } from '$app/state';
 	import { get } from 'svelte/store';
-	import { Meta, PageHeader, Pagination, Pill, EmptyState } from '$lib/components/common';
-	import { PaginationData } from '$lib/models';
-	import { incidentFilter } from '$lib/stores/list-filters';
-	import { formatRelativeTime, formatDuration, durationSeconds } from '$lib/utils/format-utils';
+	import { Meta, PageHeader, Pagination, Pill, EmptyState } from '#lib/components/common/index.js';
+	import { PaginationData } from '#lib/models/index.js';
+	import { incidentFilter } from '#lib/stores/list-filters.js';
+	import { formatRelativeTime, formatDuration, durationSeconds } from '#lib/utils/format-utils.js';
 
 	let { data } = $props();
 
@@ -16,17 +16,14 @@
 	let filter = $derived((data.filter ?? 'all') as 'all' | 'open' | 'resolved');
 	let openCount = $derived(data.openCount ?? 0);
 	let totalCount = $derived(data.totalCount ?? 0);
-	// `as any`: PaginationData's public overload is the copy-constructor; its impl
-	// also accepts a raw { current, size, totalItems } (what the load returns).
-	let pagination = $derived(new PaginationData(data.pagination as any));
+	let pagination = $derived(new PaginationData(data.pagination));
 
 	function setFilter(f: 'all' | 'open' | 'resolved') {
 		// Persist across navigation (#141), then reset to page 1 (no page param).
 		incidentFilter.set(f);
 		// eslint-disable-next-line svelte/no-navigation-without-resolve -- the path is resolve()d inside this template literal
-		goto(f === 'all' ? resolve('/incidents') : `${resolve('/incidents')}?filter=${f}`, {
-			noScroll: true,
-			keepFocus: true
+		goto(f === 'all' ? resolve('incidents') : `${resolve('incidents')}?filter=${f}`, {
+			reset: false
 		});
 	}
 	function onPage(detail: { page: number }) {
@@ -34,7 +31,7 @@
 		params.set('page', String(detail.page));
 		if (filter !== 'all') params.set('filter', filter);
 		// eslint-disable-next-line svelte/no-navigation-without-resolve -- the path is resolve()d inside this template literal
-		goto(`${resolve('/incidents')}?${params}`, { noScroll: true });
+		goto(`${resolve('incidents')}?${params}`, { reset: false });
 	}
 
 	onMount(() => {
@@ -43,26 +40,36 @@
 		const stored = get(incidentFilter);
 		if (stored !== 'all' && (data.filter ?? 'all') === 'all') {
 			// eslint-disable-next-line svelte/no-navigation-without-resolve -- the path is resolve()d inside this template literal
-			goto(`${resolve('/incidents')}?filter=${stored}`, {
-				noScroll: true,
-				keepFocus: true,
-				replaceState: true
+			goto(`${resolve('incidents')}?filter=${stored}`, {
+				reset: false,
+				replace: true
 			});
 		}
 	});
-	usePoll(() => invalidateAll(), 15000);
+	usePoll(() => refreshAll(), 15000);
 </script>
 
 <Meta title="Incidents" />
 
 <PageHeader title="Incidents" sub={`${openCount} open · ${totalCount} total`}>
 	{#snippet actions()}
-		<span class="list-spin" class:on={!!$navigating} aria-hidden="true" title="Loading…"></span>
+		<span class="list-spin" class:on={!!navigating.to} aria-hidden="true" title="Loading…"></span>
+
 		<div class="seg">
-			<button class:on={filter === 'all'} onclick={() => setFilter('all')}>All</button>
-			<button class:on={filter === 'open'} onclick={() => setFilter('open')}>Open</button>
-			<button class:on={filter === 'resolved'} onclick={() => setFilter('resolved')}
-				>Resolved</button
+			<button
+				class:on={filter === 'all'}
+				aria-pressed={filter === 'all'}
+				onclick={() => setFilter('all')}>All</button
+			>
+			<button
+				class:on={filter === 'open'}
+				aria-pressed={filter === 'open'}
+				onclick={() => setFilter('open')}>Open</button
+			>
+			<button
+				class:on={filter === 'resolved'}
+				aria-pressed={filter === 'resolved'}
+				onclick={() => setFilter('resolved')}>Resolved</button
 			>
 		</div>
 	{/snippet}

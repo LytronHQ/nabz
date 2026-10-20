@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
-	import { invalidateAll } from '$app/navigation';
-	import { usePoll } from '$lib/utils/use-poll';
+	import { refreshAll } from '$app/navigation';
+	import { usePoll } from '#lib/utils/use-poll.js';
 	import {
 		Meta,
 		PageHeader,
@@ -10,8 +10,8 @@
 		Sparkline,
 		AddButton,
 		EmptyState
-	} from '$lib/components/common';
-	import { formatMs, formatRelativeTime } from '$lib/utils/format-utils';
+	} from '#lib/components/common/index.js';
+	import { formatMs, formatRelativeTime } from '#lib/utils/format-utils.js';
 
 	let { data } = $props();
 
@@ -19,12 +19,16 @@
 	let zones = $derived(data.zones ?? []);
 	let monitors = $derived(data.monitors ?? []);
 	let openIncidents = $derived(data.openIncidents ?? []);
-	let healthyZones = $derived(zones.filter((z: any) => z.healthy).length);
-
+	let healthyZones = $derived(zones.filter((z) => z.healthy).length);
 	const tone = (s: string) =>
-		(({ up: 'up', down: 'down', pending: 'pend', paused: 'paused' }) as any)[s] ?? 'accent';
+		(
+			({ up: 'up', down: 'down', pending: 'pend', paused: 'paused' }) as Record<
+				string,
+				'up' | 'down' | 'pend' | 'paused'
+			>
+		)[s] ?? 'accent';
 
-	usePoll(() => invalidateAll(), 10000);
+	usePoll(() => refreshAll(), 10000);
 </script>
 
 <Meta title="Dashboard" />
@@ -34,7 +38,7 @@
 	sub={`${sc.total} monitor${sc.total === 1 ? '' : 's'} · ${zones.length} zone${zones.length === 1 ? '' : 's'}`}
 >
 	{#snippet actions()}
-		<AddButton label="Add monitor" href={resolve('/monitors/new')} />
+		<AddButton label="Add monitor" href={resolve('monitors/new')} />
 	{/snippet}
 </PageHeader>
 
@@ -192,9 +196,9 @@
 				{/each}
 				{#if monitors.length === 0}
 					<tr>
-						<td colspan="5" style="padding:16px">
-							<a href={resolve('/monitors/new')}>Add your first monitor →</a>
-						</td>
+						<td colspan="5" style="padding:16px"
+							><a href={resolve('monitors/new')}>Add your first monitor →</a></td
+						>
 					</tr>
 				{/if}
 			</tbody>

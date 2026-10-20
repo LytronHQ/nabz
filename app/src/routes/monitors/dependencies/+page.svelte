@@ -1,13 +1,13 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { Meta, PageHeader, EmptyState } from '$lib/components/common';
-	import { ViewTabs } from '$lib/components/monitors';
-	import { DependencyGraph } from '$lib/components/dependencies';
-	import DependenciesStore from '$lib/stores/dependencies-store';
-	import { DependenciesList, DependencyNewItem } from '$lib/models/dependency';
-	import type ApiError from '$lib/models/api-error';
-	import { pushToast } from '$lib/stores/toast-store';
-	import { friendlyMessage } from '$lib/utils/api-error-utils';
+	import { Meta, PageHeader, EmptyState } from '#lib/components/common/index.js';
+	import { ViewTabs } from '#lib/components/monitors/index.js';
+	import { DependencyGraph } from '#lib/components/dependencies/index.js';
+	import DependenciesStore from '#lib/stores/dependencies-store.js';
+	import { DependenciesList, DependencyNewItem } from '#lib/models/dependency.js';
+	import type ApiError from '#lib/models/api-error.js';
+	import { pushToast } from '#lib/stores/toast-store.js';
+	import { friendlyMessage } from '#lib/utils/api-error-utils.js';
 
 	let { data } = $props();
 

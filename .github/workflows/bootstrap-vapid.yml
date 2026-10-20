@@ -1,0 +1,61 @@
+name: bootstrap-vapid
+
+# Mints the VAPID key pair Web Push alerts are signed with (#602) and stores it
+# in the environment's secrets: VAPID_PRIVATE_KEY for the evaluator, which sends,
+# and VAPID_PUBLIC_KEY for the web, which subscribes devices with it.
+#
+# Mint-if-missing, and only that. Browsers bind every subscription to the public
+# key it was made with, so a new pair silently orphans every device that turned
+# notifications on. There is deliberately no overwrite input: rotating is a
+# decision to make by hand (delete both secrets, run this, users re-subscribe).
+#
+# Separate from bootstrap-credentials because an environment that already has
+# its credentials still needs these, and that workflow refuses to run there.
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Target environment
+        type: environment
+        required: true
+  workflow_call:
+    inputs:
+      environment: { type: string, required: true }
+
+permissions:
+  contents: read
+
+jobs:
+  vapid:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Mint the key pair if the environment has none
+        env:
+          GH_TOKEN: ${{ secrets.GH_SECRETS_PAT }}
+          ENV_NAME: ${{ inputs.environment }}
+          EXISTING_PRIVATE: ${{ secrets.VAPID_PRIVATE_KEY }}
+          EXISTING_PUBLIC: ${{ secrets.VAPID_PUBLIC_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -n "$EXISTING_PRIVATE" ] && [ -n "$EXISTING_PUBLIC" ]; then
+            echo "VAPID keys already exist for $ENV_NAME — keeping them (a new pair would orphan every subscription)"
+            exit 0
+          fi
+          if [ -n "$EXISTING_PRIVATE" ] || [ -n "$EXISTING_PUBLIC" ]; then
+            # Half a pair cannot be repaired: the missing half is not derivable
+            # from a public key, and a new private key does not match the old one.
+            echo "::error::Only one of VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY exists. Delete it and re-run to mint a fresh pair."
+            exit 1
+          fi
+          [ -n "$GH_TOKEN" ] || { echo "::error::GH_SECRETS_PAT is not set for this environment"; exit 1; }
+          # Values go straight from the script into gh secret set, never printed.
+          keys="$(./deploy/vapid-keys.sh)"
+          gh secret set VAPID_PRIVATE_KEY --env "$ENV_NAME" --repo "${{ github.repository }}" \
+            --body "$(sed -n 's/^VAPID_PRIVATE_KEY=//p' <<<"$keys")"
+          gh secret set VAPID_PUBLIC_KEY --env "$ENV_NAME" --repo "${{ github.repository }}" \
+            --body "$(sed -n 's/^VAPID_PUBLIC_KEY=//p' <<<"$keys")"
+          echo "minted VAPID_PUBLIC_KEY and VAPID_PRIVATE_KEY for $ENV_NAME"

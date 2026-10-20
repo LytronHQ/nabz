@@ -1,6 +1,6 @@
 import { type Actions, redirect } from '@sveltejs/kit';
 import { z } from 'zod';
-import { getActionFailure, getFormRecord } from '$lib/utils/action-utils';
+import { getActionFailure, getFormRecord } from '#lib/utils/action-utils.js';
 
 const resetPasswordSchema = z.object({
 	email: z.string()
@@ -16,7 +16,7 @@ export const actions = {
 		const { email } = formData;
 		try {
 			await locals.pb?.collection('users').requestPasswordReset(email);
-		} catch (err: any) {
+		} catch (err) {
 			return getActionFailure(
 				err,
 				'An error occurred while sending email for reset password. Please try again later.'

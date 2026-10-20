@@ -20,12 +20,11 @@ Open source under the [AGPL-3.0](LICENSE), with a paid hosted version at
 ```mermaid
 graph LR
   UI[SvelteKit UI · Cloudflare Workers] --> PB[(PocketBase)]
-  W[worker · per zone] --> VK[(Valkey · due:zone)]
-  W --> PB
+  W[worker · per zone] --> PB
   EV[evaluator · central] --> PB
 ```
 
-- **worker** (one per zone): pulls due monitors from a per-zone Valkey sorted set (`due:<zone>`), runs the check, writes a `checks` row, reschedules. Also publishes `zone_stats` (queue depth, schedule lag, heartbeat). Each zone has its **own local Valkey** — no central queue.
+- **worker** (one or more per zone, on any hosts): keeps its share of the zone's schedule in memory, runs each check as it falls due, writes a `checks` row, reschedules. Workers in a zone split the monitors between them by a roster derived from their own heartbeats in PocketBase — no queue, no coordinator, no state on the box. One of them publishes `zone_stats` (queue depth, schedule lag, heartbeat).
 - **evaluator** (exactly one, central, independent of the zones): reads recent `checks`, runs N-of-M **consensus** → writes `monitors.status`, opens/resolves `incidents`, sends **alerts**, runs the **dead-man's switch**, builds **rollups**, and purges old `checks`.
 - **PocketBase** holds everything (monitors, checks, rollups, incidents, alert_channels, zone_stats, users, scoped service accounts). The worker/evaluator authenticate as **least-privilege service accounts**, not superusers.
 
@@ -38,7 +37,7 @@ See [`docs/architecture-decisions.md`](docs/architecture-decisions.md) for why t
 | UI | SvelteKit (Cloudflare Workers) |
 | Backend | Go — `worker`, `evaluator`, shared `corelib` |
 | Data / auth | PocketBase (v0.23+) |
-| Queue | Valkey (one per zone) |
+| Scheduling | In-process, per worker (no queue) |
 
 ## Running locally
 
@@ -50,9 +49,9 @@ the bootstrap; tightening a constraint in it is a data migration
 
 ### Repo layout
 
-- `worker/` — per-zone checker (Valkey sorted-set scheduling → writes `checks`)
+- `worker/` — per-zone checker (in-process scheduling → writes `checks`)
 - `evaluator/` — central consensus/status, incidents, alerts, rollups + retention
-- `corelib/` — shared Go (PocketBase client, Valkey cache, models)
+- `corelib/` — shared Go (PocketBase client, health surface, models)
 - `app/` — SvelteKit UI
 - `deploy/` — per-role compose + setup/orchestration scripts
 - `infrastructure/pb_schema.json` — PocketBase collections
@@ -71,7 +70,7 @@ evaluator can reach PocketBase.
 | Role | Compose file | What it is |
 |---|---|---|
 | **pocketbase** | [`deploy/pocketbase.yml`](deploy/pocketbase.yml) | The datastore, and the only stateful piece. Holds monitors, checks, incidents, rollups. |
-| **worker** | [`deploy/worker.yml`](deploy/worker.yml) | One per zone — runs the checks for that zone. Ships a Valkey sidecar for scheduling; several workers in a zone share one Valkey. |
+| **worker** | [`deploy/worker.yml`](deploy/worker.yml) | One or more per zone — they split that zone's monitors between them, scheduling in-process. Stateless. |
 | **evaluator** | [`deploy/central.yml`](deploy/central.yml) | Exactly one. Consensus and status, incidents, alerting, rollups, retention. |
 | **web** | [`deploy/web.yml`](deploy/web.yml) | The SvelteKit UI and API. |
 
@@ -103,8 +102,11 @@ superuser: `PB_URL`, `PB_AUTH_COLLECTION` (`service_accounts`), `PB_ADMIN_USERNA
   a row per API request and the log database outgrows the real data.
 - **worker** ([`worker.env.example`](deploy/worker.env.example)) — `REGION_NAME` is
   the zone this worker checks for, and it is the shard key written to every check
-  row, so treat it as immutable. `WORKER_REPLICAS` runs several workers on one host;
-  they share the host's Valkey and elect one seeder between them.
+  row, so treat it as immutable. `WORKER_CONCURRENCY` is how many checks one worker
+  runs at once (default 8) — the cheapest way to add capacity. A zone may also hold
+  several workers, on this host (`WORKER_REPLICAS`) or others; they split its
+  monitors between them, and `WORKER_ID` must be stable and unique because it
+  decides which share each one takes.
 - **evaluator** ([`evaluator.env.example`](deploy/evaluator.env.example)) — SMTP for
   alert email, an optional `OPS_WEBHOOK_URL`, `DEADMAN_SECONDS` (how long a zone may
   be silent before it is treated as dead) and `CERT_EXPIRY_WARN_DAYS`.
@@ -132,10 +134,10 @@ different `REGION_NAME` values.
 
 ### Scaling and hardening
 
-- Several workers per zone, on one host or across several sharing a Valkey:
+- Capacity for a busy zone, and how several workers split one zone between them:
   [`docs/scaling.md`](docs/scaling.md).
 - Node hardening (firewall, key-only SSH, unattended upgrades) is in
-  [`deploy/harden.sh`](deploy/harden.sh), applied by the setup scripts.
+  `deploy/.ops/server.sh harden`, applied by the setup scripts.
 - Backups, WAL checkpointing and bounded vacuuming:
   [`deploy/pocketbase/README.md`](deploy/pocketbase/README.md).
 - Measured limits before you plan capacity:

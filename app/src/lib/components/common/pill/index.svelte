@@ -4,6 +4,8 @@
 </script>
 
 <script lang="ts">
+	import type { HTMLAttributes } from 'svelte/elements';
+
 	// Generic status pill (#165). Renders the app-wide `.pill` markup with the tone
 	// colour and optional pulsing `live` dot. Extra attributes (e.g. `style`) pass
 	// through to the span. StatusBadge renders through this; the ~20 previously
@@ -18,11 +20,10 @@
 		acknowledged: 'ack'
 	};
 
-	interface Props {
+	interface Props extends HTMLAttributes<HTMLSpanElement> {
 		tone: PillTone;
 		label?: string;
 		live?: boolean;
-		[key: string]: any;
 	}
 
 	let { tone, label = '', live = false, ...rest }: Props = $props();

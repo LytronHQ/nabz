@@ -64,6 +64,9 @@
 		stroke-width={def.fill ? undefined : (def.sw ?? 1.8)}
 		stroke-linecap="round"
 		stroke-linejoin="round"
-		aria-hidden="true">{@html def.d}</svg
+		aria-hidden="true"
 	>
+		<!-- eslint-disable-next-line svelte/no-at-html-tags -- trusted: `def.d` is SVG markup from the static ICONS table above, never user input -->
+		{@html def.d}
+	</svg>
 {/if}

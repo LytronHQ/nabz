@@ -22,6 +22,10 @@ type Client struct {
 	collection string
 	identity   string
 	password   string
+	// access carries the Cloudflare Access service-token headers when this node
+	// reaches PocketBase through the public tunnel rather than the private
+	// network. Empty inside the private network, where Access is not in the path.
+	access map[string]string
 
 	mu    sync.RWMutex
 	token string
@@ -45,6 +49,7 @@ func NewClient(config models.Config) (*Client, error) {
 		collection: collection,
 		identity:   config.PB.Admin.Username,
 		password:   config.PB.Admin.Password,
+		access:     accessHeaders(config.PB.Access.ClientId, config.PB.Access.ClientSecret),
 	}
 	if err := c.authenticate(); err != nil {
 		return nil, err
@@ -71,6 +76,20 @@ func NewClientWithRetry(config models.Config) *Client {
 	}
 }
 
+// accessHeaders builds the Cloudflare Access service-token pair, or nil when this
+// node is not behind Access. Both halves are required: one alone is a
+// misconfiguration that would fail every request with a 403, so it is treated as
+// "not configured" rather than sent half-formed.
+func accessHeaders(clientId, clientSecret string) map[string]string {
+	if clientId == "" || clientSecret == "" {
+		return nil
+	}
+	return map[string]string{
+		"CF-Access-Client-Id":     clientId,
+		"CF-Access-Client-Secret": clientSecret,
+	}
+}
+
 func (c *Client) authenticate() error {
 	body, _ := json.Marshal(map[string]string{
 		"identity": c.identity,
@@ -79,7 +98,7 @@ func (c *Client) authenticate() error {
 
 	// Auth against the configured collection: "_superusers" (default) or a
 	// scoped service-account collection (v0.23+ auth-collection endpoint).
-	res, err := utils.DoRequest("POST", c.baseURL+"/api/collections/"+c.collection+"/auth-with-password", body, "")
+	res, err := utils.DoRequestWithHeaders("POST", c.baseURL+"/api/collections/"+c.collection+"/auth-with-password", body, "", c.access)
 	if err != nil {
 		return fmt.Errorf("authenticating with PocketBase: %w", err)
 	}
@@ -111,7 +130,7 @@ func (c *Client) getToken() string {
 
 // request performs an authenticated request, refreshing the token once on a 401.
 func (c *Client) request(method, path string, body []byte) (utils.HTTPResult, error) {
-	res, err := utils.DoRequest(method, c.baseURL+path, body, c.getToken())
+	res, err := utils.DoRequestWithHeaders(method, c.baseURL+path, body, c.getToken(), c.access)
 	if err != nil {
 		return res, err
 	}
@@ -119,7 +138,7 @@ func (c *Client) request(method, path string, body []byte) (utils.HTTPResult, er
 		if err := c.authenticate(); err != nil {
 			return res, err
 		}
-		return utils.DoRequest(method, c.baseURL+path, body, c.getToken())
+		return utils.DoRequestWithHeaders(method, c.baseURL+path, body, c.getToken(), c.access)
 	}
 	return res, nil
 }
@@ -225,6 +244,7 @@ func (c *Client) CreateCheck(monitorId, zone string, result models.CheckResult, 
 		"error":          result.Error,
 		"redirect_count": result.RedirectCount,
 		"final_url":      result.FinalURL,
+		"inconclusive":   result.Inconclusive,
 		"checked_at":     checkedAt.UTC().Format(time.RFC3339),
 	})
 
@@ -309,6 +329,8 @@ type CheckRecord struct {
 	StatusCode int    `json:"status_code"`
 	ResponseMs int    `json:"response_ms"`
 	CheckedAt  string `json:"checked_at"`
+	// Inconclusive: failed while the worker's own network was suspect (#598).
+	Inconclusive bool `json:"inconclusive"`
 }
 
 // GetChecksSince returns a monitor's checks since the given time, oldest-first.
@@ -317,7 +339,7 @@ func (c *Client) GetChecksSince(monitorId string, since time.Time) ([]CheckRecor
 	// here, and a single 500-row page silently undercounted high-frequency
 	// monitors — a permanent error, since rollups outlive the raw checks.
 	filter := url.QueryEscape(fmt.Sprintf(`monitor = "%s" && checked_at >= "%s"`, monitorId, since.UTC().Format(pbTimeLayout)))
-	query := fmt.Sprintf("skipTotal=true&sort=checked_at&fields=zone,up,status_code,response_ms,checked_at&filter=%s", filter)
+	query := fmt.Sprintf("skipTotal=true&sort=checked_at&fields=zone,up,status_code,response_ms,checked_at,inconclusive&filter=%s", filter)
 	return listAll[CheckRecord](c, "checks", query, "checks", 0)
 }
 
@@ -904,7 +926,9 @@ func (c *Client) UpdateMonitorAfterCheck(id string, checkedAt time.Time, certExp
 // GetAnonMonitors lists the ids of all anonymous monitors to seed into the free
 // queue. They're all active until the TTL cleanup removes them.
 func (c *Client) GetAnonMonitors() ([]models.Monitor, error) {
-	return listAll[models.Monitor](c, "anon_monitors", "skipTotal=true&fields=id", "anon monitors", monitorWarnBound)
+	// last_checked too: a row never checked is due now, not somewhere in its first
+	// interval (worker anonFirstDue, #522).
+	return listAll[models.Monitor](c, "anon_monitors", "skipTotal=true&fields=id,last_checked", "anon monitors", monitorWarnBound)
 }
 
 // GetAnonMonitor fetches the fields needed to run one anonymous check.
@@ -1093,4 +1117,114 @@ func (c *Client) UpdateMonitorConsensus(id, zones, fresh string) error {
 		return fmt.Errorf("updating monitor %s consensus returned status %d: %s", id, res.StatusCode, string(res.Body))
 	}
 	return nil
+}
+
+// --- worker liveness -------------------------------------------------------
+
+// WorkerHeartbeat is one worker's liveness row: which zone it serves, its stable
+// id, and when PocketBase last saw it.
+type WorkerHeartbeat struct {
+	Id      string `json:"id"`
+	Zone    string `json:"zone"`
+	Worker  string `json:"worker"`
+	Beats   int64  `json:"beats"`
+	Updated string `json:"updated"`
+}
+
+// UpsertWorkerHeartbeat records this worker as alive in its zone and returns the
+// row's server-set `updated` time.
+//
+// That return value is the point of the method. Workers judge each other's
+// liveness by comparing timestamps, and comparing PocketBase's clock against a
+// local one means two machines in different clouds disagree about who is alive.
+// Every worker instead measures staleness against the moment PocketBase stamped
+// its OWN last heartbeat, so the whole comparison happens in one clock.
+//
+// `beats` is incremented on every write because PocketBase may treat a PATCH
+// whose values are all unchanged as a no-op, and `updated` not moving is
+// indistinguishable from a dead worker.
+func (c *Client) UpsertWorkerHeartbeat(zone, worker string) (time.Time, error) {
+	filter := url.QueryEscape(fmt.Sprintf(`zone = "%s" && worker = "%s"`, zone, worker))
+	res, err := c.request("GET", fmt.Sprintf(
+		"/api/collections/worker_heartbeats/records?perPage=1&skipTotal=true&filter=%s", filter), nil)
+	if err != nil {
+		return time.Time{}, err
+	}
+
+	if res.StatusCode == 200 {
+		var list struct {
+			Items []WorkerHeartbeat `json:"items"`
+		}
+		if err := json.Unmarshal(res.Body, &list); err == nil && len(list.Items) > 0 {
+			cur := list.Items[0]
+			body, _ := json.Marshal(map[string]interface{}{"beats": cur.Beats + 1})
+			upd, err := c.request("PATCH", "/api/collections/worker_heartbeats/records/"+cur.Id, body)
+			if err != nil {
+				return time.Time{}, err
+			}
+			if upd.StatusCode != 200 {
+				return time.Time{}, fmt.Errorf("updating worker heartbeat returned status %d: %s", upd.StatusCode, string(upd.Body))
+			}
+			return heartbeatTime(upd.Body)
+		}
+	}
+
+	body, _ := json.Marshal(map[string]interface{}{"zone": zone, "worker": worker, "beats": 1})
+	created, err := c.request("POST", "/api/collections/worker_heartbeats/records", body)
+	if err != nil {
+		return time.Time{}, err
+	}
+	if created.StatusCode != 200 && created.StatusCode != 201 {
+		return time.Time{}, fmt.Errorf("creating worker heartbeat returned status %d: %s", created.StatusCode, string(created.Body))
+	}
+	return heartbeatTime(created.Body)
+}
+
+// heartbeatTime pulls the server-set `updated` out of a written record.
+func heartbeatTime(body []byte) (time.Time, error) {
+	var rec WorkerHeartbeat
+	if err := json.Unmarshal(body, &rec); err != nil {
+		return time.Time{}, fmt.Errorf("parsing worker heartbeat: %w", err)
+	}
+	t, ok := ParseTime(rec.Updated)
+	if !ok {
+		return time.Time{}, fmt.Errorf("worker heartbeat returned an unparseable timestamp %q", rec.Updated)
+	}
+	return t, nil
+}
+
+// ListWorkerHeartbeats returns every worker row for a zone, live or not. Judging
+// which are still alive is the caller's job — it needs a clock reference, and
+// this client deliberately does not guess one.
+func (c *Client) ListWorkerHeartbeats(zone string) ([]WorkerHeartbeat, error) {
+	query := fmt.Sprintf("skipTotal=true&filter=%s&fields=%s",
+		url.QueryEscape(fmt.Sprintf(`zone = "%s"`, zone)), "id,zone,worker,beats,updated")
+	return listAll[WorkerHeartbeat](c, "worker_heartbeats", query, "worker heartbeats", 0)
+}
+
+// GetZoneStatUpdated returns the `updated` timestamp of a zone's stats row, and
+// whether the row exists at all. Used by a worker that is NOT the elected writer
+// to notice the elected one has gone quiet.
+func (c *Client) GetZoneStatUpdated(zone string) (updated string, found bool, err error) {
+	filter := url.QueryEscape(fmt.Sprintf(`zone = "%s"`, zone))
+	res, err := c.request("GET", fmt.Sprintf(
+		"/api/collections/zone_stats/records?perPage=1&skipTotal=true&fields=updated&filter=%s", filter), nil)
+	if err != nil {
+		return "", false, err
+	}
+	if res.StatusCode != 200 {
+		return "", false, fmt.Errorf("reading zone_stats returned status %d: %s", res.StatusCode, string(res.Body))
+	}
+	var list struct {
+		Items []struct {
+			Updated string `json:"updated"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(res.Body, &list); err != nil {
+		return "", false, fmt.Errorf("parsing zone_stats: %w", err)
+	}
+	if len(list.Items) == 0 {
+		return "", false, nil
+	}
+	return list.Items[0].Updated, true, nil
 }

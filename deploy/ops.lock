@@ -1,0 +1,31 @@
+# Which release of LytronHQ/ops this repo runs, and the exact bytes it was tested
+# with.
+#
+# The scripts are NOT committed here. deploy/ops-fetch.sh downloads them into
+# deploy/.ops/ (gitignored) and refuses anything whose hash is not the one below,
+# so what runs is always what was tested — a re-cut release does not slip through.
+#
+# The fetch happens on the operator's machine or the runner, never on a node.
+# remote-deploy.sh ships deploy/.ops/ along with the tracked files, so a node
+# still needs no GitHub access: a provisioning run must not depend on a download
+# at the step that rewrites the firewall and SSH.
+#
+# deploy/ops-get is the one file that IS committed, because something has to
+# bootstrap the fetch. 154 lines of POSIX sh instead of 2,853 of modules.
+#
+# OPS_VENDORED is one line per script: where it lands under deploy/.ops/, which
+# release asset it is, and the SHA256 that release published for it.
+#
+# To update: change the version, put the new SHA256s here, delete deploy/.ops/,
+# run deploy/ops-fetch.sh, then deploy/ops_vendor_test.sh.
+OPS_VERSION=v6.1.0
+OPS_VENDORED="
+server.sh     server.sh     c685acba390dc40f9cade6968119621e6eee4a42bbed7b8e22dc0c86addbbbd8
+vmlab.sh      vmlab.sh      cc5de02f4a57697e95ae137560bc668e1ee4322f279cb869a6aea0cee0329e43
+edge.sh       edge.sh       cbdf9922ff7d0a14ec173c24cd5bedc4905e867458a9b82db69354740101e1ea
+secrets.sh    secrets.sh    9d536f09ea7502eca4fd1f4c8fb54797c6e8a3c40125d4a201eb219f1dfc26ac
+db.sh         db.sh         257e9ef8f0560791cd6c6e6680d6ebce66ca76503a3f9c8243996b58f75cdcf0
+container.sh  container.sh  668b17c664d3e140ab8f93bb2602445ae6a88266743d01ae4d682badb616ade5
+"
+# deploy/ops-get itself, verified by deploy/ops_vendor_test.sh the same way.
+OPS_SHA256_OPS_GET=e113f0574774507270f9c9acc83ae167011b9cc3a270a4082807fd04ecfe3900

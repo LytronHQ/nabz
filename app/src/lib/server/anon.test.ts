@@ -2,7 +2,7 @@ import { describe, test, expect, vi } from 'vitest';
 import type { Cookies } from '@sveltejs/kit';
 
 // Hermetic: pin the signing key so the cookie roundtrip + IP hash are deterministic.
-vi.mock('$env/dynamic/private', () => ({ env: { PKCE_FLOW_ENCRYPTION_KEY: 'test-secret-key' } }));
+vi.mock('$app/env/private', () => ({ PKCE_FLOW_ENCRYPTION_KEY: 'test-secret-key' }));
 
 const { ANON_COOKIE, mintAnonToken, readAnonToken, setAnonCookie, hashIP, validateAnonTarget } =
 	await import('./anon');
@@ -80,4 +80,22 @@ describe('validateAnonTarget', () => {
 			expect(validateAnonTarget(t), t).toMatchObject({ ok: false });
 		}
 	});
+});
+
+// The anon cookie was sealed with the raw app key, the same one that leaked
+// through /signin (#580); it now uses a key derived from it, so the raw key
+// alone does not open it.
+test('the anon cookie is not sealed with the raw app key', async () => {
+	const { setAnonCookie } = await import('./anon');
+	const { decrypt } = await import('#lib/cipher-utils.js');
+	let sealed = '';
+	setAnonCookie({ set: (_n: string, v: string) => (sealed = v) } as never, 'a'.repeat(48));
+	expect(sealed).not.toBe('');
+	let opened = '';
+	try {
+		opened = decrypt(sealed, 'test-secret-key');
+	} catch {
+		opened = '';
+	}
+	expect(opened).not.toBe('a'.repeat(48));
 });

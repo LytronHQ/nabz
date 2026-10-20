@@ -1,86 +1,106 @@
-# Worker role: the worker, plus an optional local Valkey sidecar.
-# Single source of truth for what runs on a worker node.
+# Worker role: the worker container(s) on one node. Single source of truth for
+# what runs on a worker node.
 #
 #   docker compose --env-file /etc/monitors/worker.env -f deploy/worker.yml \
-#     --profile local-cache up -d --build
+#     up -d --build
 #
-#   # N replicas on one node (#311):
-#   ... --profile local-cache up -d --scale worker=3
+# A zone may hold several workers, here and on other hosts. Each keeps its own
+# in-memory due-set and checks only its share, derived from the zone's
+# worker_heartbeats rows — nothing is shared between them but the database.
 #
-# For a zone spread across several VMs, drop the profile and point every node's
-# CACHE_HOST at ONE shared Valkey (deploy/valkey-zone.yml). Every worker in a zone
-# MUST share a Valkey: two Valkeys in one zone means two due-sets, two seed
-# leaders, and every monitor probed twice.
+# Replicas are DECLARED SERVICES, not `--scale`, and that is the whole point of
+# the shape of this file. A scaled replica takes its container id as its worker
+# id, and a container id is new on every recreate. After a deploy the zone then
+# sees BOTH the dead ids and the live ones, because a heartbeat row counts as
+# alive until its TTL expires: two workers appear as four, and every monitor
+# hashing to a dead index is owned by nobody until the old rows age out.
+# Measured on real VMs before this file was changed — roster of 4 for ~50s, per
+# deploy.
+#
+# A declared service takes a FIXED id from the env file instead, so a restarted
+# worker updates the row it already had. The row goes stale for the few seconds
+# the container is down, the TTL covers that, and the roster never changes.
 #
 # Values come from the env file (see worker.env.example).
 name: monitors-worker
 
-services:
-  valkey:
-    # Per-node sidecar, for a zone that lives on a single VM. Turned off by
-    # omitting the profile when the zone points at a shared Valkey instead.
-    profiles: ["local-cache"]
-    image: valkey/valkey
-    restart: unless-stopped
-    volumes:
-      - valkey_data:/data
-    healthcheck:
-      test: ["CMD", "valkey-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+# Everything the replicas share. They differ in exactly two things: the profile
+# that enables them, and their worker id.
+x-worker: &worker
+  build:
+    context: ..
+    dockerfile: worker/dockerfile
+    args:
+      BUILD_VERSION: ${BUILD_VERSION:-dev}
+      BUILD_COMMIT: ${BUILD_COMMIT:-unknown}
+  restart: unless-stopped
+  # On SIGTERM the worker stops taking checks and waits up to 25s (drainLimit)
+  # for the ones in flight, so their results are written (#417). Docker's default
+  # 10s would SIGKILL a 20s check halfway through; this must stay above drainLimit.
+  stop_grace_period: 30s
+  # No depends_on: PocketBase is remote, and NewClientWithRetry already blocks
+  # with backoff until it answers.
+  expose:
+    - "8080"
+  healthcheck:
+    test: ["CMD", "/app/worker", "--health-check"]
+    interval: 30s
+    timeout: 10s
+    retries: 3
 
+x-env: &env
+  REGION_NAME: ${REGION_NAME}
+  # SSRF guard (#268): true restricts checks to public IPs (the anonymous
+  # "free" zone sets this; the normal eu/us zones leave it off/blank).
+  BLOCK_PRIVATE_TARGETS: ${BLOCK_PRIVATE_TARGETS:-}
+  PB_URL: ${PB_URL}
+  PB_AUTH_COLLECTION: ${PB_AUTH_COLLECTION:-}
+  PB_ADMIN_USERNAME: ${PB_ADMIN_USERNAME}
+  PB_ADMIN_PASSWORD: ${PB_ADMIN_PASSWORD}
+  # Cloudflare Access service token, for a worker that reaches PocketBase
+  # through the public tunnel instead of the private network (e.g. Fly.io).
+  # Blank on the Hetzner nodes, which have a private route and never meet Access.
+  CF_ACCESS_CLIENT_ID: ${CF_ACCESS_CLIENT_ID:-}
+  CF_ACCESS_CLIENT_SECRET: ${CF_ACCESS_CLIENT_SECRET:-}
+  # How many checks run at once. Blank uses the built-in default (8). This is
+  # how a zone gets more throughput — one worker running more checks in
+  # parallel, before a second worker.
+  WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-}
+  # Two-tier health endpoint (#103). HEALTH_ADDR=off disables it; a blank
+  # HEALTH_DEBUG_TOKEN keeps only the minimal public tier.
+  HEALTH_ADDR: ${HEALTH_ADDR:-:8080}
+  HEALTH_DEBUG_TOKEN: ${HEALTH_DEBUG_TOKEN:-}
+
+services:
+  # Always on. WORKER_ID is stable per node — remote-deploy.sh derives it from
+  # the zone and the node address.
   worker:
-    build:
-      context: ..
-      dockerfile: worker/dockerfile
-      args:
-        BUILD_VERSION: ${BUILD_VERSION:-dev}
-        BUILD_COMMIT: ${BUILD_COMMIT:-unknown}
-    restart: unless-stopped
-    # No container_name: it must stay unset for --scale to work at all, since
-    # two containers cannot share one name.
-    #
-    # No depends_on either — it would name the sidecar, and the sidecar does not
-    # exist in a shared-Valkey deployment. ConnectCacheWithRetry already blocks
-    # with backoff until Valkey answers, which covers both cases and does not
-    # depend on the cache being a local service.
+    <<: *worker
     environment:
-      - REGION_NAME=${REGION_NAME}
-      # SSRF guard (#268): true restricts checks to public IPs (the anonymous
-      # "free" zone sets this; the normal eu/us zones leave it off/blank).
-      - BLOCK_PRIVATE_TARGETS=${BLOCK_PRIVATE_TARGETS:-}
-      # Defaults to the sidecar; point at the shared zone Valkey to spread a zone
-      # across VMs. CACHE_PASSWORD is empty for the sidecar (only reachable inside
-      # this compose network) and required for a shared one.
-      - CACHE_HOST=${CACHE_HOST:-valkey}
-      - CACHE_PORT=${CACHE_PORT:-6379}
-      - CACHE_PASSWORD=${CACHE_PASSWORD:-}
-      # Ops identity only, never written to a check row. Blank means the
-      # container hostname, which is already unique per replica — so scaling
-      # needs no per-replica config.
-      - WORKER_ID=${WORKER_ID:-}
-      - PB_URL=${PB_URL}
-      - PB_AUTH_COLLECTION=${PB_AUTH_COLLECTION:-}
-      - PB_ADMIN_USERNAME=${PB_ADMIN_USERNAME}
-      - PB_ADMIN_PASSWORD=${PB_ADMIN_PASSWORD}
-      # Two-tier health endpoint (#103). HEALTH_ADDR=off disables it; a blank
-      # HEALTH_DEBUG_TOKEN keeps only the minimal public tier.
-      - HEALTH_ADDR=${HEALTH_ADDR:-:8080}
-      - HEALTH_DEBUG_TOKEN=${HEALTH_DEBUG_TOKEN:-}
-    # expose, not ports: a fixed host port allows exactly one replica, since the
-    # second would collide on it. HEALTH_PORT_RANGE publishes a range for
-    # debugging when a host port is genuinely wanted — Docker then assigns each
-    # replica its own port out of it.
-    expose:
-      - "8080"
+      <<: *env
+      WORKER_ID: ${WORKER_ID:-}
     ports:
       - "${HEALTH_PORT_RANGE:-8080-8099}:8080"
-    healthcheck:
-      test: ["CMD", "/app/worker", "--health-check"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
 
-volumes:
-  valkey_data:
+  # Extra workers on this node. setup-worker.sh enables as many profiles as
+  # WORKER_REPLICAS asks for. Each id is the node's id with its replica number,
+  # so it survives a recreate — which is the difference between a silent deploy
+  # and a zone that half-stops checking for the length of a roster TTL.
+  worker-2:
+    <<: *worker
+    profiles: ["replica2"]
+    environment:
+      <<: *env
+      WORKER_ID: ${WORKER_ID:-}-2
+  worker-3:
+    <<: *worker
+    profiles: ["replica3"]
+    environment:
+      <<: *env
+      WORKER_ID: ${WORKER_ID:-}-3
+  worker-4:
+    <<: *worker
+    profiles: ["replica4"]
+    environment:
+      <<: *env
+      WORKER_ID: ${WORKER_ID:-}-4

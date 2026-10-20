@@ -1,6 +1,6 @@
 <script lang="ts">
-	import { Meta, PageHeader } from '$lib/components/common';
-	import { MonitorMap, ViewTabs } from '$lib/components/monitors';
+	import { Meta, PageHeader } from '#lib/components/common/index.js';
+	import { MonitorMap, ViewTabs } from '#lib/components/monitors/index.js';
 
 	let { data } = $props();
 	let mode: 'tag' | 'domain' = $state('tag');
@@ -14,8 +14,14 @@
 >
 	{#snippet actions()}
 		<div class="seg">
-			<button class:on={mode === 'tag'} onclick={() => (mode = 'tag')}>By tag</button>
-			<button class:on={mode === 'domain'} onclick={() => (mode = 'domain')}>By domain</button>
+			<button class:on={mode === 'tag'} aria-pressed={mode === 'tag'} onclick={() => (mode = 'tag')}
+				>By tag</button
+			>
+			<button
+				class:on={mode === 'domain'}
+				aria-pressed={mode === 'domain'}
+				onclick={() => (mode = 'domain')}>By domain</button
+			>
 		</div>
 	{/snippet}
 </PageHeader>

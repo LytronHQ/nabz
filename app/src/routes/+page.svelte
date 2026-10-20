@@ -1,8 +1,9 @@
 <script lang="ts">
+	import { VERSION_LABEL } from '#lib/version.js';
 	import { resolve } from '$app/paths';
 
 	import { goto } from '$app/navigation';
-	import { Meta, Pill } from '$lib/components/common';
+	import { Meta, Pill, ThemeToggle } from '#lib/components/common/index.js';
 
 	let { data } = $props();
 	const year = new Date().getFullYear();
@@ -38,9 +39,9 @@
 
 <Meta title="nabz — uptime monitoring for the services you run" />
 
-<!-- theme-dark pins the marketing landing to the dark palette regardless of the
-     visitor's saved app theme (the app itself still follows the theme toggle). -->
-<div class="lp-page theme-dark">
+<!-- Follows the visitor's theme like the app, with a quick switch in the top bar
+     (#556); it used to be pinned dark (#79). -->
+<div class="lp-page">
 	<div class="lp">
 		<!-- top bar -->
 		<header class="lp-nav">
@@ -52,15 +53,16 @@
 						stroke="#fff"
 						stroke-width="2.4"
 						stroke-linecap="round"
-						stroke-linejoin="round"><path d="M3 12h4l2.5-7 5 14 2.5-7H21" /></svg
+						stroke-linejoin="round"><path d="M3 12h4l2.5-7 5 14 2.5-7H21"></path></svg
 					>
 				</span>
 				<b>nabz</b>
 			</a>
 			<nav class="lp-nav-links">
 				<a href="#how">How it works</a>
-				<a href={resolve('/signin')}>Sign in</a>
-				<a class="btn btn-primary" href={resolve('/signup')}>Get started</a>
+				<a href={resolve('signin')}>Sign in</a>
+				<a class="btn btn-primary" href={resolve('signup')}>Get started</a>
+				<ThemeToggle />
 			</nav>
 		</header>
 
@@ -97,8 +99,10 @@
 				</form>
 				{#if tryError}<p class="lp-try-err" role="alert">{tryError}</p>{/if}
 				<p class="lp-beta">
-					<span class="dot"></span>No signup — watch it work, then
-					<a href={resolve('/signup')}>create an account</a> to keep it. Free during beta.
+					<span class="dot"></span>
+					No signup — watch it work, then
+					<a href={resolve('signup')}>create an account</a>
+					to keep it. Free during beta.
 				</p>
 			</div>
 
@@ -106,7 +110,7 @@
 			<div class="lp-panel card" aria-hidden="true">
 				<div class="lp-panel-head">
 					<span class="mono">monitors</span>
-					<span class="mono lp-muted">checked from eu · us</span>
+					<span class="mono lp-muted">checked from Europe · Asia</span>
 				</div>
 				<div class="lp-row">
 					<span class="lp-host">example.com</span>
@@ -137,7 +141,7 @@
 			</p>
 			<div class="lp-grid">
 				<div class="lp-feature">
-					<h3>Websites &amp; APIs</h3>
+					<h3>Websites & APIs</h3>
 					<p>
 						HTTP/HTTPS checks with a full <b>DNS → connect → TLS → first-byte</b> timing breakdown,
 						status codes, response-body keyword checks, and a heads-up before either a
@@ -146,7 +150,7 @@
 					</p>
 				</div>
 				<div class="lp-feature">
-					<h3>Servers &amp; ports</h3>
+					<h3>Servers & ports</h3>
 					<p>
 						Is a <b>TCP port</b> open, and how fast does it connect? Plus ping-style reachability for
 						the hosts behind your services.
@@ -161,7 +165,7 @@
 					</p>
 				</div>
 				<div class="lp-feature">
-					<h3>Cron &amp; heartbeats</h3>
+					<h3>Cron & heartbeats</h3>
 					<p>
 						Scheduled jobs check in to a private URL each run. If one goes quiet past its window,
 						you hear about it.
@@ -202,8 +206,9 @@
 				<div class="lp-feature">
 					<h3>Where you already are</h3>
 					<p>
-						Email, webhook, <b>Slack</b>, <b>Telegram</b>, <b>Discord</b>, and <b>PagerDuty</b> — and
-						you can send a test to any of them with a click.
+						Email, webhook, <b>Slack</b>, <b>Telegram</b>, <b>Discord</b>, <b>PagerDuty</b>, and
+						<b>push notifications</b> straight to your phone — and you can send a test to any of them
+						with a click.
 					</p>
 				</div>
 				<div class="lp-feature">
@@ -283,11 +288,11 @@
 				<div class="lp-feature">
 					<span class="lp-tag mono">soon</span>
 					<h3>Public status pages</h3>
-					<p>Shareable uptime &amp; incident history for a chosen set of monitors.</p>
+					<p>Shareable uptime & incident history for a chosen set of monitors.</p>
 				</div>
 				<div class="lp-feature">
 					<span class="lp-tag mono">soon</span>
-					<h3>Public API &amp; tokens</h3>
+					<h3>Public API & tokens</h3>
 					<p>
 						Manage monitors and pull status programmatically — for the people who automate
 						everything.
@@ -305,8 +310,9 @@
 		<section class="lp-final">
 			<h2>Start watching your services.</h2>
 			<div class="lp-cta">
-				<a class="btn btn-primary btn-lg" href={resolve('/signup')}>Get started</a>
-				<a class="btn btn-ghost btn-lg" href={resolve('/signin')}>Sign in</a>
+				<a class="btn btn-primary btn-lg" href={resolve('signup')}>Get started</a>
+
+				<a class="btn btn-ghost btn-lg" href={resolve('signin')}>Sign in</a>
 			</div>
 			<p class="lp-beta"><span class="dot"></span>Free during beta.</p>
 		</section>
@@ -320,15 +326,18 @@
 						stroke="#fff"
 						stroke-width="2.4"
 						stroke-linecap="round"
-						stroke-linejoin="round"><path d="M3 12h4l2.5-7 5 14 2.5-7H21" /></svg
+						stroke-linejoin="round"><path d="M3 12h4l2.5-7 5 14 2.5-7H21"></path></svg
 					>
 				</span>
 				<b>nabz</b>
 			</div>
-			<span class="lp-muted">© {year} nabz · Free during beta</span>
+			<span class="lp-muted">© {year} nabz · Free during beta · {VERSION_LABEL}</span>
 			<div class="lp-footer-links">
-				{#if data?.changelogVisible}<a href={resolve('/changelog')}>Changelog</a>{/if}
-				<a href={resolve('/signin')}>Sign in</a>
+				{#if data?.changelogVisible}
+					<a href={resolve('changelog')}>Changelog</a>
+				{/if}
+
+				<a href={resolve('signin')}>Sign in</a>
 			</div>
 		</footer>
 	</div>

@@ -1,20 +1,26 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
-	import type { EntityIdType } from '$lib/constants';
+	import type { EntityIdType } from '#lib/constants.js';
 	import { onMount } from 'svelte';
 	import { get } from 'svelte/store';
 	import { goto } from '$app/navigation';
-	import { usePoll } from '$lib/utils/use-poll';
-	import { PageHeader, Pagination, Meta, AddButton, EmptyState } from '$lib/components/common';
-	import { List, ViewTabs } from '$lib/components/monitors';
-	import { MonitorItem, MonitorsList } from '$lib/models/monitor';
-	import MonitorsStore from '$lib/stores/monitors-store';
-	import type ApiError from '$lib/models/api-error';
-	import { DefaultPageSize } from '$lib/constants';
-	import { pushToast } from '$lib/stores/toast-store';
-	import { friendlyMessage } from '$lib/utils/api-error-utils';
-	import { monitorFilters } from '$lib/stores/list-filters';
-	import { parseTagSearch, toggleTag } from '$lib/utils/tag-search';
+	import { usePoll } from '#lib/utils/use-poll.js';
+	import {
+		PageHeader,
+		Pagination,
+		Meta,
+		AddButton,
+		EmptyState
+	} from '#lib/components/common/index.js';
+	import { List, ViewTabs } from '#lib/components/monitors/index.js';
+	import { MonitorItem, MonitorsList } from '#lib/models/monitor.js';
+	import MonitorsStore from '#lib/stores/monitors-store.js';
+	import type ApiError from '#lib/models/api-error.js';
+	import { DefaultPageSize } from '#lib/constants.js';
+	import { pushToast } from '#lib/stores/toast-store.js';
+	import { friendlyMessage } from '#lib/utils/api-error-utils.js';
+	import { monitorFilters } from '#lib/stores/list-filters.js';
+	import { parseTagSearch, toggleTag } from '#lib/utils/tag-search.js';
 
 	let { data } = $props();
 
@@ -27,7 +33,7 @@
 	// values cannot be assigned to. `data` is only the initial paint; every later
 	// change, pagination included, arrives through the store subscription below.
 	// svelte-ignore state_referenced_locally
-	let monitors: MonitorsList = $state(new MonitorsList(data.monitors as any));
+	let monitors: MonitorsList = $state(new MonitorsList(data.monitors));
 
 	const monitorsStore = new MonitorsStore();
 	let lastError: ApiError | null = null;
@@ -132,7 +138,7 @@
 	sub={`${monitors?.items?.length ?? 0} monitor${(monitors?.items?.length ?? 0) === 1 ? '' : 's'}`}
 >
 	{#snippet actions()}
-		<AddButton label="Add monitor" href={resolve('/monitors/new')} />
+		<AddButton label="Add monitor" href={resolve('monitors/new')} />
 	{/snippet}
 </PageHeader>
 
@@ -142,6 +148,7 @@
 	<input
 		class="form-input mon-search"
 		type="search"
+		aria-label="Search monitors"
 		placeholder="Search name, URL, or tag…"
 		bind:value={search}
 		oninput={onSearchInput}
@@ -152,6 +159,7 @@
 				type="button"
 				class="mon-pill"
 				class:active={statusFilter === s}
+				aria-pressed={statusFilter === s}
 				onclick={() => setStatus(s)}
 			>
 				{s === '' ? 'All' : s}
@@ -167,6 +175,7 @@
 				type="button"
 				class="mon-tagquick"
 				class:active={activeTags.includes(t)}
+				aria-pressed={activeTags.includes(t)}
 				title={activeTags.includes(t) ? `Remove #${t} from filter` : `Filter by #${t}`}
 				onclick={() => toggleTagInSearch(t)}>#{t}</button
 			>
@@ -203,7 +212,7 @@
 	{:else}
 		<EmptyState message="No monitors yet.">
 			{#snippet action()}
-				<AddButton label="Add your first monitor" href={resolve('/monitors/new')} />
+				<AddButton label="Add your first monitor" href={resolve('monitors/new')} />
 			{/snippet}
 		</EmptyState>
 	{/if}

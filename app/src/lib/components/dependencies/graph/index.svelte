@@ -15,12 +15,15 @@
 		forceManyBody,
 		forceCenter,
 		forceCollide,
+		forceX,
+		forceY,
 		type Simulation
 	} from 'd3-force';
 	import { select, pointer } from 'd3-selection';
 	import { zoom as d3zoom, zoomIdentity, type ZoomTransform } from 'd3-zoom';
 	import { drag as d3drag } from 'd3-drag';
-	import { blastRadius, type Edge } from '$lib/utils/dependency-graph';
+	import { blastRadius, type Edge } from '#lib/utils/dependency-graph.js';
+	import { fitTransform } from '#lib/utils/fit-view.js';
 
 	type Mon = { id: string; name: string; status: string };
 	interface Props {
@@ -41,7 +44,7 @@
 		fy?: number | null;
 	};
 	// d3-force mutates source/target from ids to node objects in place.
-	type Link = { source: any; target: any };
+	type Link = { source: string | Node; target: string | Node };
 
 	let svgEl: SVGSVGElement | undefined = $state();
 	let width = $state(900);
@@ -52,6 +55,10 @@
 	let sim: Simulation<Node, Link> | null = $state(null);
 	let hovered: string | null = $state(null);
 	let dragMoved = false;
+	// Until the user pans, zooms or drags, the view keeps refitting while the layout
+	// settles, so every node is on screen whatever the canvas width.
+	let userMoved = false;
+	let zoomer: ReturnType<typeof d3zoom<SVGSVGElement, unknown>> | null = null;
 	let hideTimer: ReturnType<typeof setTimeout> | undefined;
 
 	// Only edges whose endpoints both still exist as monitors.
@@ -76,7 +83,8 @@
 		new Set<string>([...impacted, ...monitors.filter((m) => m.status === 'down').map((m) => m.id)])
 	);
 	const edgeHot = (l: Link) => impacted.has(idOf(l.source)) && affected.has(idOf(l.target));
-	const idOf = (endpoint: any) => (typeof endpoint === 'string' ? endpoint : endpoint?.id);
+	const idOf = (endpoint: string | Node) =>
+		typeof endpoint === 'string' ? endpoint : endpoint?.id;
 
 	function showPopup(id: string) {
 		clearTimeout(hideTimer);
@@ -124,6 +132,10 @@
 			)
 			.force('charge', forceManyBody().strength(-260))
 			.force('center', forceCenter(width / 2, height / 2))
+			// Monitors without links have only repulsion acting on them and drifted far
+			// enough apart that no zoom level could show them all on a phone.
+			.force('x', forceX(width / 2).strength(0.06))
+			.force('y', forceY(height / 2).strength(0.06))
 			.force(
 				'collide',
 				forceCollide<Node>((d) => d.r + 10)
@@ -131,6 +143,7 @@
 			.on('tick', () => {
 				nodes = nodes;
 				links = links;
+				if (!userMoved) fitView();
 			});
 	}
 
@@ -147,10 +160,13 @@
 	});
 
 	onMount(() => {
-		const z = d3zoom<SVGSVGElement, unknown>()
-			.scaleExtent([0.25, 4])
-			.on('zoom', (e) => (tf = e.transform));
-		select(svgEl!).call(z);
+		zoomer = d3zoom<SVGSVGElement, unknown>()
+			.scaleExtent([MIN_K, 4])
+			.on('zoom', (e) => {
+				if (e.sourceEvent) userMoved = true;
+				tf = e.transform;
+			});
+		select(svgEl!).call(zoomer);
 		lastKey =
 			monitors.map((m) => m.id + ':' + m.status).join(',') +
 			'|' +
@@ -168,6 +184,7 @@
 			.on('start', (e) => {
 				e.sourceEvent.stopPropagation();
 				dragMoved = false;
+				userMoved = true;
 				if (!e.active) sim?.alphaTarget(0.3).restart();
 				n.fx = n.x;
 				n.fy = n.y;
@@ -211,8 +228,9 @@
 	// Trim each edge to the node perimeters and leave room for the arrowhead so it
 	// sits on the target's edge, not under it.
 	function geom(l: Link) {
-		const s = l.source,
-			t = l.target;
+		// Nodes by now: the simulation has resolved the ids (see Link).
+		const s = l.source as Node,
+			t = l.target as Node;
 		const sx = s?.x ?? 0,
 			sy = s?.y ?? 0,
 			tx = t?.x ?? 0,
@@ -238,9 +256,36 @@
 	// the popup so you can gauge impact without reading the whole graph.
 	let hoveredDependents = $derived(hovered ? blastRadius(validEdges, hovered).size : 0);
 
+	// The hover popup carries the full name.
+	const truncate = (s: string, n = 20) => (s.length > n ? s.slice(0, n - 1) + '…' : s);
+
+	// Most monitors here have no dependency, so only repulsion acts on them and a
+	// big fleet spreads wider than a phone canvas holds even at 25%: 10 of 140
+	// nodes sat off-canvas with no way to pan to them (#569). Fitting has to win
+	// over legibility; anyone who wants to read a label zooms in.
+	const MIN_K = 0.05;
+
+	// Labels sit above the node (12.5px text, ~7px per character).
+	function fitView() {
+		if (!svgEl || !zoomer) return;
+		const t = fitTransform(
+			nodes.map((n) => ({
+				x: n.x ?? 0,
+				y: n.y ?? 0,
+				r: n.r,
+				hw: truncate(n.label).length * 3.6,
+				above: n.r + 20
+			})),
+			width,
+			height,
+			{ pad: 16, top: 48, minK: MIN_K }
+		);
+		select(svgEl).call(zoomer.transform, zoomIdentity.translate(t.x, t.y).scale(t.k));
+	}
+
 	function resetView() {
-		tf = zoomIdentity;
-		if (svgEl) select(svgEl).call((d3zoom() as any).transform, zoomIdentity);
+		userMoved = false;
+		fitView();
 	}
 </script>
 
@@ -315,7 +360,7 @@
 								class:active={hovered === n.id}
 								style="fill:{statusColor(n.status)}"
 							/>
-							<text class="mon-label" y={-n.r - 6}>{n.label}</text>
+							<text class="mon-label" y={-n.r - 6}>{truncate(n.label)}</text>
 						</g>
 					{/each}
 				</g>
@@ -324,7 +369,6 @@
 	</div>
 
 	{#if hoveredMon && popupXY}
-		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<div
 			class="popup"
 			style="left:{popupXY[0]}px; top:{popupXY[1]}px"

@@ -4,20 +4,37 @@ import raw from '../../../../CHANGELOG.md?raw';
 
 export type ChangelogEntry = { version: string; date: string; html: string };
 
+// `"` too: a link URL lands inside href="…", and an unescaped quote there closed
+// the attribute and let the rest of the URL add its own (#567).
 function escapeHtml(s: string): string {
-	return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+	return s
+		.replace(/&/g, '&amp;')
+		.replace(/</g, '&lt;')
+		.replace(/>/g, '&gt;')
+		.replace(/"/g, '&quot;');
 }
 
-// Minimal inline markdown: links, bold, inline code. Everything is HTML-escaped
-// first, so only the tags we generate here are ever emitted.
+// Minimal inline markdown: links, bold, emphasis, inline code. Everything is
+// HTML-escaped first, so only the tags we generate here are ever emitted. Code
+// spans are cut out before the other rules so `PB_URL` or `a*b` stay literal.
 function inline(s: string): string {
-	let out = escapeHtml(s);
-	out = out.replace(
+	return escapeHtml(s)
+		.split(/(`[^`]+`)/)
+		.map((part) =>
+			part.startsWith('`') && part.length > 1 ? `<code>${part.slice(1, -1)}</code>` : prose(part)
+		)
+		.join('');
+}
+
+function prose(s: string): string {
+	let out = s.replace(
 		/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,
 		'<a href="$2" rel="noopener noreferrer">$1</a>'
 	);
 	out = out.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-	out = out.replace(/`([^`]+)`/g, '<code>$1</code>');
+	// *x* and _x_ only at word edges, so snake_case_names are left alone.
+	out = out.replace(/(^|[^\w*])\*([^*\s][^*]*?)\*(?![\w*])/g, '$1<em>$2</em>');
+	out = out.replace(/(^|[^\w])_([^_\s][^_]*?)_(?!\w)/g, '$1<em>$2</em>');
 	return out;
 }
 

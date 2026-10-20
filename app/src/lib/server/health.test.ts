@@ -257,7 +257,9 @@ describe('the web beat gets its own staleness window (#339 cadence)', () => {
 		// the web beat's much longer window.
 		const items = buildItems({
 			pbReachable: true,
-			rows: [{ zone: 'eu-central', updated: new Date(now - 100_000).toISOString().replace('T', ' ') }],
+			rows: [
+				{ zone: 'eu-central', updated: new Date(now - 100_000).toISOString().replace('T', ' ') }
+			],
 			now,
 			staleMs: 90_000,
 			webStaleMs: 300_000

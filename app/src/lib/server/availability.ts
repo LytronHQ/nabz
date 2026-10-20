@@ -1,4 +1,5 @@
 import type PocketBase from 'pocketbase';
+import { COUNTED_CHECKS } from '#lib/server/checks.js';
 
 /**
  * Multi-window availability for a monitor, read from the `rollups` collection
@@ -226,7 +227,7 @@ async function partialHour(
 	now: Date
 ): Promise<{ up: number; total: number }> {
 	const hourStart = new Date(Math.floor(now.getTime() / 3_600_000) * 3_600_000);
-	const base = `monitor="${monitorId}" && checked_at >= "${pbDate(hourStart)}"`;
+	const base = `monitor="${monitorId}" && checked_at >= "${pbDate(hourStart)}" && ${COUNTED_CHECKS}`;
 	try {
 		const total = await pb.collection('checks').getList(1, 1, { filter: base });
 		if (total.totalItems === 0) return { up: 0, total: 0 };

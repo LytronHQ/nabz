@@ -1,3 +1,7 @@
 # Environment files hold secrets — never commit them (keep the *.example).
 *.env
 !*.env.example
+
+# Fetched by deploy/ops-fetch.sh from the release pinned in deploy/ops.lock.
+# Shipped to nodes by remote-deploy.sh, but never committed.
+.ops/

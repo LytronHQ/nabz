@@ -51,7 +51,7 @@ fi
 
 # One-time host hardening (ufw / auto-updates / fail2ban / key-only SSH).
 if [ ! -f /etc/monitors/.hardened ]; then
-  bash "$APP_DIR/deploy/harden.sh" && touch /etc/monitors/.hardened
+  bash "$APP_DIR/deploy/.ops/server.sh" harden && touch /etc/monitors/.hardened
 fi
 
 # The private NIC has to be up before anything tries to reach PocketBase over it

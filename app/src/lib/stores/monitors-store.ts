@@ -1,12 +1,17 @@
 import { get, writable } from 'svelte/store';
-import { DefaultPageSize, type EntityIdType } from '$lib/constants';
-import { type MonitorItem, type MonitorNewItem, MonitorsList } from '$lib/models/monitor';
-import BaseStore from './base-store';
-import { getFormData } from '$lib/utils/server-form-data-utils';
-import { pushToast } from '$lib/stores/toast-store';
-import { friendlyMessage } from '$lib/utils/api-error-utils';
+import { DefaultPageSize, type EntityIdType } from '#lib/constants.js';
+import { type MonitorItem, type MonitorNewItem, MonitorsList } from '#lib/models/monitor.js';
+import BaseStore, { isLoaded } from './base-store';
+import { getFormData } from '#lib/utils/server-form-data-utils.js';
+import { pushToast } from '#lib/stores/toast-store.js';
+import { friendlyMessage } from '#lib/utils/api-error-utils.js';
 
 const monitors = writable({} as MonitorsList);
+// Bumped by every successful save. A list load that started before a save carries
+// data from before it: it ran late once, after an add that had itself thrown on the
+// still-unloaded list, so the dialog stayed open over an empty list while the
+// alert channel existed (#641). A load that sees the count change fetches again.
+let saves = 0;
 
 export default class MonitorsStore extends BaseStore {
 	subscribeMonitors = monitors.subscribe;
@@ -19,7 +24,8 @@ export default class MonitorsStore extends BaseStore {
 		perPage: number = DefaultPageSize,
 		background: boolean = false,
 		filters: { q?: string; tags?: string[]; status?: string } = {}
-	) {
+	): Promise<void> {
+		const started = saves;
 		const qs = new URLSearchParams({ page: String(page), perPage: String(perPage) });
 		if (filters.q) qs.set('q', filters.q);
 		for (const tag of filters.tags ?? []) qs.append('tag', tag);
@@ -29,6 +35,7 @@ export default class MonitorsStore extends BaseStore {
 			if (!background) pushToast('error', friendlyMessage(this.lastError));
 			return;
 		}
+		if (saves !== started) return this.getAll(page, perPage, background, filters);
 		monitors.set(new MonitorsList(data));
 	}
 
@@ -41,12 +48,14 @@ export default class MonitorsStore extends BaseStore {
 
 		if (!item) return false;
 
+		saves++;
+		if (!isLoaded(get(monitors))) return true;
 		const list = new MonitorsList(get(monitors)).add(item);
 		if (list.shouldReload(list.pagination.totalItems)) {
 			await this.getAll(list.pagination.current, list.pagination.size, true);
 		} else {
 			list.updatePagination();
-			monitors.update((e) => list);
+			monitors.update(() => list);
 		}
 
 		return true;
@@ -61,7 +70,8 @@ export default class MonitorsStore extends BaseStore {
 
 		if (!item) return false;
 
-		monitors.update((e) => new MonitorsList(e).edit(item));
+		saves++;
+		if (isLoaded(get(monitors))) monitors.update((e) => new MonitorsList(e).edit(item));
 		return true;
 	}
 
@@ -73,6 +83,8 @@ export default class MonitorsStore extends BaseStore {
 		});
 		if (this.lastError) return false;
 
+		saves++;
+		if (!isLoaded(get(monitors))) return true;
 		const list = new MonitorsList(get(monitors)).remove(id);
 
 		if (list.shouldReload(list.pagination.totalItems)) {
@@ -80,7 +92,7 @@ export default class MonitorsStore extends BaseStore {
 			await this.getAll(page, list.pagination.size, true);
 		} else {
 			list.updatePagination();
-			monitors.update((e) => list);
+			monitors.update(() => list);
 		}
 
 		return true;

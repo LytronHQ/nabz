@@ -1,6 +1,6 @@
 import { error } from '@sveltejs/kit';
 import type { PageServerLoad } from './$types';
-import { serviceClient } from '$lib/server/service-pb';
+import { serviceClient } from '#lib/server/service-pb.js';
 
 // The anonymous "try it" detail page (#271). A signed-out visitor views the
 // monitor they just created; it's authorized by their signed anon_session cookie

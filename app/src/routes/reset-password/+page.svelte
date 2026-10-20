@@ -1,30 +1,26 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
-	import { H3, Meta } from '$lib/components/common';
+	import { AuthCard, Meta } from '#lib/components/common/index.js';
 </script>
 
 <Meta title="Reset password" />
 
-<div class="max-w-sm mx-auto mt-8">
-	<form class="flex flex-col space-y-3" method="POST">
-		<H3>Forgot password? Let's create a new one.</H3>
-		<label class="space-y-2 block">
-			<span class="form-lbl">Your email</span>
+<AuthCard title="Forgot your password?" sub="We'll email you a link to set a new one.">
+	<form method="POST">
+		<div class="field">
+			<label for="email">Your email</label>
 			<input
+				id="email"
 				type="email"
 				name="email"
-				class="form-input block w-full"
-				placeholder="Enter your email address"
+				placeholder="you@example.com"
+				autocomplete="email"
 				required
 			/>
-		</label>
-		<button type="submit" class="btn btn-primary w-full justify-center"
+		</div>
+		<button type="submit" class="btn btn-primary btn-block"
 			>Send me an email for password reset</button
 		>
-		<p class="text-gray-500 dark:text-gray-400">
-			<a href={resolve('/signin')} class="text-primary-600 hover:underline dark:text-primary-500">
-				Go back to login
-			</a>
-		</p>
 	</form>
-</div>
+	<p class="auth-alt"><a href={resolve('signin')}>Back to sign in</a></p>
+</AuthCard>

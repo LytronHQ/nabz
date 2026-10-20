@@ -1,5 +1,5 @@
-import { json, type RequestHandler } from '@sveltejs/kit';
-import { failIfNoId, failIfNoUser } from '$lib/utils/api-utils';
+import type { RequestHandler } from '@sveltejs/kit';
+import { failIfNoId, failIfNoUser } from '#lib/utils/api-utils.js';
 
 function pbDate(d: Date): string {
 	return d.toISOString().replace('T', ' ');
@@ -25,14 +25,14 @@ export const GET: RequestHandler = async ({ locals, params: { id }, url }) => {
 		period = 'day';
 		since = new Date(now - 30 * 86_400_000);
 	} else {
-		return json({ error: 'Invalid range' }, { status: 400 });
+		return Response.json({ error: 'Invalid range' }, { status: 400 });
 	}
 
 	// Ownership check.
 	try {
 		await locals.pb!.collection('monitors').getOne(id, { filter: `user="${locals.user?.id}"` });
 	} catch {
-		return json({ error: 'Monitor not found' }, { status: 404 });
+		return Response.json({ error: 'Monitor not found' }, { status: 404 });
 	}
 
 	let filter = `monitor="${id}" && period="${period}" && bucket_start >= "${pbDate(since)}"`;
@@ -73,5 +73,5 @@ export const GET: RequestHandler = async ({ locals, params: { id }, url }) => {
 			up: b.cnt ? (b.up / b.cnt) * 100 >= 50 : true
 		}));
 
-	return json({ points });
+	return Response.json({ points });
 };

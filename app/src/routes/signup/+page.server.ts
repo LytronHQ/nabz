@@ -1,12 +1,15 @@
-import { type Actions } from '@sveltejs/kit';
+import type { ClientResponseError } from 'pocketbase';
+import { type Actions, redirect } from '@sveltejs/kit';
 import { z } from 'zod';
 import type { PageServerLoad } from './$types';
-import { getActionFailure, getAuthCallbackData, getFormRecord } from '$lib/utils/action-utils';
-import { migrateAnonMonitors } from '$lib/server/anon-migrate';
-import { clearAnonCookie } from '$lib/server/anon';
+import { getActionFailure, getAuthCallbackData, getFormRecord } from '#lib/utils/action-utils.js';
+import { migrateAnonMonitors } from '#lib/server/anon-migrate.js';
+import { clearAnonCookie } from '#lib/server/anon.js';
 
-export const load: PageServerLoad = async ({ locals, url }) => {
-	return await getAuthCallbackData(locals, url);
+export const load: PageServerLoad = async ({ locals }) => {
+	// Already signed in: the form would read as if you were signed out.
+	if (locals.user) throw redirect(303, '/dashboard');
+	return await getAuthCallbackData(locals);
 };
 
 const signupSchema = z.object({
@@ -43,8 +46,8 @@ export const actions = {
 			}
 
 			return { success: true };
-		} catch (err: any) {
-			switch (err.status) {
+		} catch (err) {
+			switch ((err as ClientResponseError).status) {
 				case 400:
 					return getActionFailure(err, 'Failed to register, please try again.');
 				case 403:

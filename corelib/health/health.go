@@ -84,8 +84,8 @@ func cause(l Label) string {
 	}
 }
 
-// Item is one checked thing: a dependency (valkey, pocketbase) on a per-node
-// report, or a peer node/zone on the aggregator.
+// Item is one checked thing: a dependency (pocketbase) on a per-node report, or a
+// peer node/zone on the aggregator.
 type Item struct {
 	Name     string
 	Label    Label

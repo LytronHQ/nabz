@@ -5,4 +5,6 @@ playwright-report/
 # Local channel credentials for the real-delivery tests (later increment) — never
 # committed; each channel test skips when its credential is absent.
 .env.local
+# Web Push key pair minted by setup.sh (local, throwaway).
+.vapid.env
 results.json

@@ -1,17 +1,17 @@
 import { randomBytes } from 'node:crypto';
-import { json, type RequestHandler } from '@sveltejs/kit';
+import type { RequestHandler } from '@sveltejs/kit';
 import type { ListResult, RecordModel } from 'pocketbase';
 import {
 	MonitorItem,
 	MonitorItemValidator,
 	MonitorNewItem,
 	toMonitorConfig
-} from '$lib/models/monitor';
-import { failIfNoResponse, failIfNoUser } from '$lib/utils/api-utils';
-import { DefaultPageSize } from '$lib/constants';
-import { getApiErrors } from '$lib/utils/action-utils';
-import { computeUptime24h } from '$lib/server/checks';
-import { getLastDowntime } from '$lib/server/incidents';
+} from '#lib/models/monitor.js';
+import { failIfNoResponse, failIfNoUser } from '#lib/utils/api-utils.js';
+import { DefaultPageSize } from '#lib/constants.js';
+import { getApiErrors } from '#lib/utils/action-utils.js';
+import { computeUptime24h } from '#lib/server/checks.js';
+import { getLastDowntime } from '#lib/server/incidents.js';
 
 export const GET: RequestHandler = async ({ locals, url }) => {
 	failIfNoUser(locals);
@@ -65,9 +65,9 @@ export const GET: RequestHandler = async ({ locals, url }) => {
 			})
 		);
 
-		return json({ ...result, items });
+		return Response.json({ ...result, items });
 	} catch (err) {
-		return json(getApiErrors(err, 'Error getting monitors'), { status: 500 });
+		return Response.json(getApiErrors(err, 'Error getting monitors'), { status: 500 });
 	}
 };
 
@@ -101,8 +101,8 @@ export const POST: RequestHandler = async ({ locals, request }) => {
 
 		const item = failIfNoResponse(response);
 
-		return json(new MonitorItem(item), { status: 201 });
+		return Response.json(new MonitorItem(item), { status: 201 });
 	} catch (err) {
-		return json(getApiErrors(err, 'Error creating monitor'), { status: 500 });
+		return Response.json(getApiErrors(err, 'Error creating monitor'), { status: 500 });
 	}
 };

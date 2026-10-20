@@ -1,10 +1,13 @@
 import { test, expect, type APIRequestContext } from '@playwright/test';
+import { createDecipheriv, createECDH, hkdfSync, randomBytes } from 'node:crypto';
 
 // Real channel-delivery journeys (#126): create a real alert channel, drive a
 // monitor DOWN through the real evaluator, and assert the alert actually went out.
 //
 // - Webhook is asserted end-to-end offline: the evaluator posts to a receiver on
 //   the fixture server, and the test reads the exact payload back.
+// - Push likewise: the fixture stands in for the push service, and the test
+//   decrypts the alert with the device keys it subscribed with.
 // - Telegram / Slack / Discord hit the REAL providers (a test bot / incoming
 //   webhooks) and assert nabz's delivery result (channel_events outcome =
 //   "delivered"), which catches "well-formed request the provider rejected" — the
@@ -40,9 +43,20 @@ async function create(api: APIRequestContext, token: string, coll: string, data:
 
 type ChannelSpec = { type: string; config: Record<string, string>; label: string };
 
+// Telegram, Slack, Discord and PagerDuty alerts land in front of a person, and the
+// monitor's name is the alert's headline. "[nabz] e2e telegram is DOWN" read like
+// a real outage every night; say in the headline that it is a test and that DOWN
+// is the point (the target is the fixture's /status/500).
+const TEST_MONITOR_SUFFIX = ' (test monitor, DOWN on purpose)';
+
 // Create the channel + a policy that notifies only it + a DOWN monitor bound to
 // that policy. Returns the ids and a cleanup that removes all three.
-async function wireDownAlert(api: APIRequestContext, token: string, userId: string, spec: ChannelSpec) {
+async function wireDownAlert(
+	api: APIRequestContext,
+	token: string,
+	userId: string,
+	spec: ChannelSpec
+) {
 	const ch = await create(api, token, 'alert_channels', {
 		user: userId,
 		type: spec.type,
@@ -57,7 +71,7 @@ async function wireDownAlert(api: APIRequestContext, token: string, userId: stri
 	});
 	const mon = await create(api, token, 'monitors', {
 		user: userId,
-		name: spec.label,
+		name: spec.label + TEST_MONITOR_SUFFIX,
 		type: 'website',
 		target: `${FIXTURE_NET}/status/500`,
 		interval: 30,
@@ -66,7 +80,9 @@ async function wireDownAlert(api: APIRequestContext, token: string, userId: stri
 		escalation_policy: pol.id
 	});
 	const del = (coll: string, id: string) =>
-		api.delete(`${PB}/api/collections/${coll}/records/${id}`, { headers: { Authorization: token } });
+		api.delete(`${PB}/api/collections/${coll}/records/${id}`, {
+			headers: { Authorization: token }
+		});
 	return {
 		channelId: ch.id,
 		cleanup: async () => {
@@ -119,7 +135,78 @@ test('webhook channel: the incident payload actually reaches the receiver', asyn
 
 		const body = await (await request.get(`${FIXTURE_HOST}/hook/${hookId}`)).json();
 		expect(body.event).toBe('incident.opened');
-		expect(body.monitor).toBe('e2e webhook');
+		expect(body.monitor).toBe('e2e webhook' + TEST_MONITOR_SUFFIX);
+
+		await expectDelivered(request, token, channelId);
+	} finally {
+		await cleanup();
+	}
+});
+
+// A device's side of Web Push (#602): its key pair and auth secret, so the test
+// can decrypt what the evaluator sent exactly as a browser would (RFC 8291).
+function pushDevice() {
+	const ecdh = createECDH('prime256v1');
+	ecdh.generateKeys();
+	const auth = randomBytes(16);
+	const decrypt = (body: Buffer): string => {
+		const salt = body.subarray(0, 16);
+		const idlen = body[20];
+		const asPub = body.subarray(21, 21 + idlen);
+		const ct = body.subarray(21 + idlen);
+		const shared = ecdh.computeSecret(asPub);
+		const info = Buffer.concat([Buffer.from('WebPush: info\0'), ecdh.getPublicKey(), asPub]);
+		const ikm = Buffer.from(hkdfSync('sha256', shared, auth, info, 32));
+		const cek = Buffer.from(
+			hkdfSync('sha256', ikm, salt, Buffer.from('Content-Encoding: aes128gcm\0'), 16)
+		);
+		const nonce = Buffer.from(
+			hkdfSync('sha256', ikm, salt, Buffer.from('Content-Encoding: nonce\0'), 12)
+		);
+		const d = createDecipheriv('aes-128-gcm', cek, nonce);
+		d.setAuthTag(ct.subarray(ct.length - 16));
+		const plain = Buffer.concat([d.update(ct.subarray(0, ct.length - 16)), d.final()]);
+		return plain.subarray(0, plain.lastIndexOf(2)).toString('utf8');
+	};
+	return {
+		p256dh: ecdh.getPublicKey().toString('base64url'),
+		auth: auth.toString('base64url'),
+		decrypt
+	};
+}
+
+test('push channel: the encrypted alert reaches the push service and decrypts', async ({
+	request
+}) => {
+	test.setTimeout(180_000);
+	const { token, userId } = await auth(request);
+	const id = `push-${Date.now()}`;
+	const device = pushDevice();
+	const { channelId, cleanup } = await wireDownAlert(request, token, userId, {
+		type: 'push',
+		label: 'e2e push',
+		config: { endpoint: `${FIXTURE_NET}/push/${id}`, p256dh: device.p256dh, auth: device.auth }
+	});
+	try {
+		let got: { headers: Record<string, string>; body: string } | undefined;
+		await expect
+			.poll(
+				async () => {
+					const r = await request.get(`${FIXTURE_HOST}/push/${id}`);
+					if (r.ok()) got = await r.json();
+					return !!got;
+				},
+				{ timeout: 100_000, intervals: [3000] }
+			)
+			.toBe(true);
+
+		expect(got!.headers['content-encoding']).toBe('aes128gcm');
+		expect(got!.headers.urgency).toBe('high');
+		expect(got!.headers.authorization).toMatch(/^vapid t=.+, k=.+/);
+		const alert = JSON.parse(device.decrypt(Buffer.from(got!.body, 'base64')));
+		expect(alert.title).toContain('e2e push');
+		expect(alert.title).toContain('DOWN');
+		expect(alert.url).toMatch(/^\/incidents\/\w+$/);
 
 		await expectDelivered(request, token, channelId);
 	} finally {

@@ -1,9 +1,25 @@
 name: CI
 
+# Documentation-only changes skip CI entirely: a README or docs/ edit cannot break
+# a Go test or a vitest run, and a full matrix costs ~5 billed minutes on the PR
+# plus ~6 more on the merge. Any non-doc file in the same push brings CI back.
 on:
   pull_request:
+    paths-ignore:
+      - '**.md'
+      - 'LICENSE'
   push:
     branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'LICENSE'
+
+# One run per ref. Pushing twice in quick succession should not leave the first
+# run burning a runner on a commit nobody will merge. Pull requests only: a push
+# to main must be allowed to finish, since the coverage job commits back.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # The coverage job rewrites the README badges and pushes back to main.
 permissions:
@@ -25,6 +41,9 @@ jobs:
           cache-dependency-path: app/package-lock.json
       - run: npm ci
       - run: npm run check
+      # prettier + eslint. Not run here before, which is how 13 files drifted out of
+      # style and 198 eslint errors piled up unseen (#488).
+      - run: npm run lint
       - run: npx vitest run --coverage
       - name: Coverage → summary
         if: always()
@@ -35,51 +54,100 @@ jobs:
             echo "### app coverage\n_(no coverage — tests did not complete)_" >> "$GITHUB_STEP_SUMMARY"
           fi
 
+  # ONE job for every Go module, deliberately. Each module's tests take 20-30s but
+  # a job is billed ROUNDED UP to the whole minute, and each one paid another ~20s
+  # to install its own toolchain: as four jobs this cost 4 billed minutes for ~2.2
+  # minutes of work. Sequential in one job, it is ~2.
+  #
+  # The loop keeps going after a failing module and fails at the end, so one broken
+  # module still reports the others — the property the matrix gave for free.
   go:
-    name: go (${{ matrix.module }})
+    name: go
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        module: [corelib, worker, evaluator]
-    defaults:
-      run:
-        working-directory: ${{ matrix.module }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version: '1.22.5'
-          cache-dependency-path: ${{ matrix.module }}/go.sum
-      - run: go test ./... -coverprofile=cover.out
+          cache-dependency-path: |
+            corelib/go.sum
+            worker/go.sum
+            evaluator/go.sum
+      - name: Test
+        run: |
+          fail=0
+          for m in corelib worker evaluator; do
+            echo "::group::go test $m"
+            (cd "$m" && go test ./... -coverprofile=cover.out) || fail=1
+            echo "::endgroup::"
+          done
+          exit $fail
       - name: Coverage → summary
         if: always()
         run: |
-          echo "### ${{ matrix.module }} coverage" >> "$GITHUB_STEP_SUMMARY"
-          go tool cover -func=cover.out | awk '/^total:/{print "- total **"$3"**"}' >> "$GITHUB_STEP_SUMMARY"
-
-  # pbbench has no tests and no dependencies, so it does not fit the coverage
-  # matrix — but 480 lines that nothing compiles can rot silently, and the sizing
-  # work in #331 expects to re-run it. Build and vet only.
-  bench:
-    name: go (pbbench)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version: '1.22.5'
-      - working-directory: benchmarks/pbbench
+          for m in corelib worker evaluator; do
+            [ -f "$m/cover.out" ] || continue
+            echo "### $m coverage" >> "$GITHUB_STEP_SUMMARY"
+            (cd "$m" && go tool cover -func=cover.out) \
+              | awk '/^total:/{print "- total **"$3"**"}' >> "$GITHUB_STEP_SUMMARY"
+          done
+      # pbbench has no tests and no dependencies, but 480 lines that nothing
+      # compiles can rot silently, and the sizing work in #331 expects to re-run
+      # it. Build and vet only.
+      - name: pbbench builds
+        working-directory: benchmarks/pbbench
         run: |
           go build -o /dev/null .
           go vet ./...
+      # Deploy-script tests. They run here rather than in a job of their own
+      # because a job is billed rounded up to the whole minute and these take
+      # seconds: inside an existing job they are free.
+      # The ops scripts are fetched from a pinned release rather than committed,
+      # so they are cached on the lock's contents: a run only downloads them when
+      # the lock changed.
+      - name: cache the ops scripts
+        uses: actions/cache@v4
+        with:
+          path: deploy/.ops
+          key: ops-${{ hashFiles('deploy/ops.lock') }}
 
-  # On merge to main, recompute coverage and rewrite the README's shields badges in
-  # place (the repo is private, so shields can't read a data branch — static badges
-  # baked into the README work for anyone). Commits back only when a number changed.
+      - name: fetch the ops scripts
+        run: bash deploy/ops-fetch.sh
+
+      - name: deploy script tests
+        run: |
+          bash deploy/cloudflare/access_test.sh
+          bash deploy/cloudflare/fly_token_test.sh
+          bash deploy/cloudflare/infra_access_workflow_test.sh
+          bash deploy/cloudflare/infra_tunnel_workflow_test.sh
+          bash deploy/fly_deploy_test.sh
+          bash deploy/public_worker_test.sh
+          bash deploy/hetzner/provision_test.sh
+          bash deploy/pb_maintenance_unit_test.sh
+          bash deploy/zone_seed_test.sh
+          bash deploy/pb_live_db_test.sh
+          bash deploy/pb_run_offline_stdin_test.sh
+          (cd e2e/fixture && node --test)
+          bash deploy/setup_worker_guard_test.sh
+          bash deploy/replace_worker_test.sh
+          bash deploy/bws_env_test.sh
+          bash deploy/external_watch_test.sh
+          bash deploy/vapid_keys_test.sh
+          bash deploy/pb_oauth_test.sh
+          bash e2e/pb_version_test.sh
+          bash deploy/pb_upgrade_test.sh
+          bash deploy/pb_mail_test.sh
+          bash deploy/ops_vendor_test.sh
+
+  # On merge to main, recompute coverage and say whether the README's static badges
+  # still match. It no longer commits them back: main only accepts changes through
+  # a PR, so the bot's direct push was rejected and turned every main run red from
+  # 2026-10-10 on (#646), and its commits were unsigned anyway. Stale badges are a
+  # warning, refreshed in an ordinary PR with `./scripts/coverage.sh --write`.
   coverage:
-    name: refresh coverage badges
+    name: check coverage badges
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [app, go, bench]
+    needs: [app, go]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -94,16 +162,18 @@ jobs:
       - name: Install app deps
         working-directory: app
         run: npm ci
-      - name: Regenerate README coverage badges
+      - name: Recompute coverage
         run: GO=go bash scripts/coverage.sh --write
-      - name: Commit if changed
+      - name: Report coverage and stale badges
         run: |
+          {
+            echo "### Coverage"
+            sed -n '/<!-- coverage:start -->/,/<!-- coverage:end -->/p' README.md | grep -o '!\[[^]]*\]([^)]*)' \
+              | sed -E 's/^!\[([^]]*)\].*-([0-9]+)%25-.*/- \1: \2%/'
+          } >> "$GITHUB_STEP_SUMMARY"
           if git -c core.fileMode=false diff --quiet README.md; then
-            echo "coverage badges unchanged"
+            echo "coverage badges are current"
           else
-            git -c commit.gpgsign=false \
-                -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
-                -c user.name="github-actions[bot]" \
-                commit -m "chore(ci): refresh coverage badges [skip ci]" README.md
-            git push origin HEAD:main
+            git -c core.fileMode=false diff README.md
+            echo "::warning title=Coverage badges are stale::Run ./scripts/coverage.sh --write and commit README.md in a PR."
           fi

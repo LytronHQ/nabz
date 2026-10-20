@@ -44,7 +44,7 @@ if [ ! -f "$ENV_FILE" ]; then
 fi
 
 if [ ! -f /etc/monitors/.hardened ]; then
-  bash "$APP_DIR/deploy/harden.sh" && touch /etc/monitors/.hardened
+  bash "$APP_DIR/deploy/.ops/server.sh" harden && touch /etc/monitors/.hardened
 fi
 
 echo "==> docker compose up (builds the SvelteKit app — first run takes a few minutes)"

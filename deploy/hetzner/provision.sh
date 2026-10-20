@@ -2,27 +2,34 @@
 #
 # provision.sh — create the nabz production fleet on Hetzner Cloud, then print a
 # ready-to-paste NODES block for the environment's Bitwarden project. Same spirit as
-# deploy/vm/create-vm.virt-manager.sh (local libvirt) but against Hetzner Cloud:
+# deploy/vm/vmlab.sh (local libvirt) but against Hetzner Cloud:
 # plain bash + the provider's HTTP API, no Terraform/Ansible, idempotent.
 #
 #   HCLOUD_TOKEN=… SSH_PRIVATE_KEY="$(cat ~/.ssh/id_hetzner)" ./deploy/hetzner/provision.sh
 #
-# It creates THREE servers (looked up by name first, so re-running is a no-op):
+# It creates FOUR servers (looked up by name first, so re-running is a no-op):
 #
-#   nabz-pocketbase          fsn1 (Falkenstein)  datastore + auth  (role pocketbase)
-#   nabz-evaluator           fsn1 (Falkenstein)  incidents/alerts  (role evaluator)
-#   nabz-worker-eu-central-1 fsn1 (Falkenstein)  probe zone        (role worker, zone eu-central)
+#   nabz-pocketbase            fsn1 (Falkenstein)  datastore + auth  (role pocketbase)
+#   nabz-evaluator             fsn1 (Falkenstein)  incidents/alerts  (role evaluator)
+#   nabz-worker-eu-central-1   fsn1 (Falkenstein)  probe zone        (role worker, zone eu-central)
+#   nabz-worker-ap-southeast-1 sin  (Singapore)    probe zone        (role worker, zone ap-southeast)
 #
-# ONE zone for now, deliberately. A second region is wanted — single-zone
-# consensus can't outvote a bad network path (evaluator/consensus.go), so with
-# one zone the evaluator falls back to the N-consecutive-failures rule instead of
-# cross-zone agreement. But the cx line we buy is EU-only, and the US/APAC
-# alternatives cost 3x (cpx11 in ash is EUR 17.49/mo vs EUR 5.49). A second zone
-# goes in when Hetzner makes those locations purchasable on a comparable plan;
-# there is no interim US VM. It only *creates the servers*; the
-# actual deploy is still `./deploy/remote-deploy.sh prod`, which consumes the
-# NODES block this prints. Hardening (ufw, key-only SSH, …) runs on-host via
-# deploy/harden.sh during that deploy — not here.
+# Two zones, because single-zone consensus can't outvote a bad network path
+# (evaluator/consensus.go): with one zone the evaluator falls back to the
+# N-consecutive-failures rule instead of cross-zone agreement.
+#
+# The Singapore worker is the odd one out, twice over (#498):
+#   - The cx line is EU-only, so it is a cpx02 — the FLEET entry names its own type.
+#   - A Hetzner private network lives in ONE network zone (ours is eu-central), so
+#     sin cannot join it. The node is created with no network and no placement
+#     group, and is printed in NODES as `worker <ip> ap-southeast public`, which
+#     tells remote-deploy.sh to point it at PocketBase through the tunnel and
+#     Cloudflare Access instead of the private address.
+#
+# It only *creates the servers*; the actual deploy is still
+# `./deploy/remote-deploy.sh prod`, which consumes the NODES block this prints.
+# Hardening (ufw, key-only SSH, …) runs on-host via deploy/server.sh harden during
+# that deploy — not here.
 #
 # Required env:
 #   HCLOUD_TOKEN   Hetzner Cloud API token (Project → Security → API tokens,
@@ -36,9 +43,10 @@
 # Optional env:
 #   SSH_KEY_NAME      Skip the fingerprint lookup and use this Hetzner key name
 #                     verbatim. Escape hatch; normally unset.
-#   SERVER_TYPE       Hetzner server type (default cx23 — 2 vCPU / 4 GB / 40 GB,
-#                     €5.49/mo). NOTE: the cx line is EU-only (fsn1/hel1/nbg1);
-#                     see the preflight check below.
+#   SERVER_TYPE       Hetzner server type for every FLEET entry that does not name
+#                     its own (default cx23 — 2 vCPU / 4 GB / 40 GB, €5.49/mo).
+#                     NOTE: the cx line is EU-only (fsn1/hel1/nbg1); see the
+#                     preflight check below.
 #   FLEET_ROLES       Comma-separated roles to provision, for standing up a
 #                     subset (e.g. FLEET_ROLES=pocketbase for a throwaway test
 #                     of the volume path). Default: the whole fleet.
@@ -46,7 +54,8 @@
 #   SERVER_PREFIX     Name prefix for the fleet (default nabz-).
 set -euo pipefail
 
-API="https://api.hetzner.cloud/v1"
+# Overridable only so provision_test.sh can point the real script at a stub.
+API="${HCLOUD_API:-https://api.hetzner.cloud/v1}"
 SERVER_TYPE="${SERVER_TYPE:-cx23}"
 IMAGE="${IMAGE:-ubuntu-24.04}"
 SERVER_PREFIX="${SERVER_PREFIX:-nabz-}"
@@ -57,7 +66,8 @@ command -v jq   >/dev/null 2>&1 || die "missing 'jq' — sudo apt install -y jq"
 : "${HCLOUD_TOKEN:?set HCLOUD_TOKEN (Hetzner Cloud API token, Read & Write)}"
 : "${SSH_PRIVATE_KEY:?set SSH_PRIVATE_KEY (the deploy key itself; its fingerprint selects the Hetzner key)}"
 
-# The fleet: "suffix:location:role:zone". zone is only meaningful for workers.
+# The fleet: "suffix:location:role:zone[:type]". zone is only meaningful for
+# workers; type overrides SERVER_TYPE for that one server.
 # PocketBase first so it's up before the others authenticate against it.
 #
 # Naming convention (aligns with the zone-identity model in #311):
@@ -71,6 +81,7 @@ FLEET=(
   "pocketbase:fsn1:pocketbase:"
   "evaluator:fsn1:evaluator:"
   "worker-eu-central-1:fsn1:worker:eu-central"
+  "worker-ap-southeast-1:sin:worker:ap-southeast:cpx02"
 )
 
 # urlenc — percent-encode a value for use in a query string. Hetzner's DEFAULT
@@ -103,16 +114,39 @@ api() {
 # `cx` line is EU-only, so a fleet entry in ash/hil/sin silently fails at create
 # time, AFTER the earlier servers already exist. Check up front and refuse, with
 # the list of locations that would work, instead of half-provisioning.
-TYPE_LOCS="$(api GET "/server_types?name=$SERVER_TYPE" | jq -r '.server_types[0].prices[]?.location' | sort -u)"
-[ -n "$TYPE_LOCS" ] || die "server type '$SERVER_TYPE' does not exist (or is not available on this account). Check https://console.hetzner.cloud → Servers → Add Server."
+#
+# Per entry, because an entry may name its own type (the Singapore worker is a
+# cpx02: no cx type is sold there).
+declare -A TYPE_LOCS  # type -> newline-separated locations it is sold in
 for entry in "${FLEET[@]}"; do
-  IFS=: read -r _suffix loc role _zone <<<"$entry"
+  IFS=: read -r _suffix loc role _zone etype <<<"$entry"
   case ",${FLEET_ROLES:-},"  in *,,*) ;; *",$role,"*) ;; *) continue ;; esac
-  grep -qx "$loc" <<<"$TYPE_LOCS" || die "server type '$SERVER_TYPE' is not available in '$loc' (wanted by the $role node).
-  '$SERVER_TYPE' is sold in: $(tr '\n' ' ' <<<"$TYPE_LOCS")
-  Either move that node to one of those locations (edit FLEET), or set SERVER_TYPE to a
-  line that is sold in '$loc' — the shared 'cx' types are EU-only, US/APAC need 'cpx'/'ccx'
+  type="${etype:-$SERVER_TYPE}"
+  if [ -z "${TYPE_LOCS[$type]+set}" ]; then
+    TYPE_LOCS[$type]="$(api GET "/server_types?name=$type" | jq -r '.server_types[0].prices[]?.location' | sort -u)"
+  fi
+  [ -n "${TYPE_LOCS[$type]}" ] || die "server type '$type' does not exist (or is not available on this account). Check https://console.hetzner.cloud → Servers → Add Server."
+  grep -qx "$loc" <<<"${TYPE_LOCS[$type]}" || die "server type '$type' is not available in '$loc' (wanted by the $role node).
+  '$type' is sold in: $(tr '\n' ' ' <<<"${TYPE_LOCS[$type]}")
+  Either move that node to one of those locations (edit FLEET), or give its FLEET entry
+  a type that is sold in '$loc' — the shared 'cx' types are EU-only, US/APAC need 'cpx'/'ccx'
   at 3x the price. Refusing to provision a partial fleet."
+done
+
+# Which network zone each location is in. The private network exists in exactly
+# one (PRIVATE_NETWORK_ZONE), and a server elsewhere cannot be attached to it —
+# Hetzner rejects the create outright. Those nodes are "public": no network, and
+# they reach PocketBase through the tunnel instead (#498).
+PRIVATE_NETWORK_ZONE="${PRIVATE_NETWORK_ZONE:-eu-central}"
+declare -A LOC_ZONE
+while IFS=$'\t' read -r _loc _nz; do LOC_ZONE[$_loc]="$_nz"; done \
+  < <(api GET "/locations" | jq -r '.locations[] | [.name, .network_zone] | @tsv')
+is_public() { # location
+  [ "${LOC_ZONE[$1]:-}" != "$PRIVATE_NETWORK_ZONE" ]
+}
+for entry in "${FLEET[@]}"; do
+  IFS=: read -r _suffix loc _ <<<"$entry"
+  [ -n "${LOC_ZONE[$loc]:-}" ] || die "unknown Hetzner location '$loc' in FLEET."
 done
 
 # --- SSH key: identify it by FINGERPRINT, not by name -------------------------
@@ -149,7 +183,7 @@ echo "· deploy key: $SSH_KEY_NAME"
 # on its own independent path, which for a monitoring product is the safer
 # failure mode, and cheaper than a gateway server at ~€0.50/mo per address.
 #
-# Nothing is exposed by having one: harden.sh runs ufw with SSH as the only
+# Nothing is exposed by having one: server.sh harden runs ufw with SSH as the only
 # inbound port, key-only, with fail2ban, and PocketBase is reached through the
 # Cloudflare Tunnel, which is an outbound connection.
 #
@@ -262,56 +296,20 @@ for stale in $(api GET "/firewalls" \
   api DELETE "/firewalls/$stale" >/dev/null
 done
 
-# --- create (or find) each server -------------------------------------------
-declare -A IP   # role|zone -> reachable ip (public when there is one), for NODES
-declare -A SID  # role|zone -> server id, for network attachment
-for entry in "${FLEET[@]}"; do
-  IFS=: read -r suffix loc role zone <<<"$entry"
-  # FLEET_ROLES filter: empty = the whole fleet.
-  case ",${FLEET_ROLES:-},"  in *,,*) ;; *",$role,"*) ;; *) echo "· skipping $role (not in FLEET_ROLES)"; continue ;; esac
-  name="${SERVER_PREFIX}${suffix}"
-
-  existing="$(api GET "/servers?name=$(urlenc "$name")")"
-  if [ "$(jq '.servers | length' <<<"$existing")" -gt 0 ]; then
-    ip="$(jq -r '.servers[0].public_net.ipv4.ip // empty' <<<"$existing")"
-    echo "· $name already exists ($loc)${ip:+ — $ip}"
-  else
-    require_egress
-    echo "==> creating $name ($role${zone:+, zone=$zone}) in $loc [$SERVER_TYPE / $IMAGE]"
-    body="$(jq -nc \
-      --arg name "$name" --arg type "$SERVER_TYPE" --arg image "$IMAGE" \
-      --arg loc "$loc" --arg key "$SSH_KEY_NAME" \
-      --arg role "$role" --arg zone "$zone" \
-      --argjson v4 "$PUBLIC_IPV4" --argjson v6 "$PUBLIC_IPV6" \
-      --argjson pg "$PG_ID" --arg env "$ENVIRONMENT" \
-      '{name:$name, server_type:$type, image:$image, location:$loc,
-        ssh_keys:[$key], public_net:{enable_ipv4:$v4, enable_ipv6:$v6},
-        placement_group:$pg,
-        labels:({project:"nabz", env:$env, role:$role} + (if $zone=="" then {} else {zone:$zone} end))}')"
-    ip="$(api POST "/servers" "$body" | jq -r '.server.public_net.ipv4.ip // empty')"
-    echo "   created${ip:+ — $ip}${ip:+}"
-    # Guarded: PRIVATE_NETWORK is not assigned until the private-network block
-    # further down, and under `set -u` the bare form aborts here — on the only
-    # path that reaches it (PUBLIC_IPV4=false), immediately after the first server
-    # is created. That is precisely the half-provisioned fleet the preflights above
-    # exist to prevent.
-    [ -n "$ip" ] || echo "   (no public IP — reachable only from inside ${PRIVATE_NETWORK:-${SERVER_PREFIX}vnet})"
-  fi
-  IP["${role}|${zone}"]="$ip"
-  SID["${role}|${zone}"]="$(jq -r '.servers[0].id // empty' <<<"$existing")"
-  [ -z "${SID["${role}|${zone}"]}" ] && SID["${role}|${zone}"]="$(api GET "/servers?name=$(urlenc "$name")" | jq -r '.servers[0].id')"
-  [ "$role" = "pocketbase" ] && PB_SERVER_ID="$(jq -r '.servers[0].id // empty' <<<"$existing")"
-  [ "$role" = "pocketbase" ] && [ -z "${PB_SERVER_ID:-}" ] && PB_SERVER_ID="$(api GET "/servers?name=$(urlenc "$name")" | jq -r '.servers[0].id')"
-done
-
-# --- private network -----------------------------------------------------------
+# --- private network, BEFORE any server exists --------------------------------
 # Worker and evaluator reach PocketBase over this network and never touch the
 # public internet (#338). PocketBase itself has no public inbound port at all —
 # the web app comes in through a Cloudflare Tunnel instead. Private traffic is
 # free and doesn't count against the traffic allowance.
 #
-# Attaching an EXISTING server needs no rebuild: Hetzner images configure the new
-# interface via cloud-init / hc-utils and start a DHCP client on it.
+# This block runs BEFORE the create loop for one reason: the network id has to be
+# in the create payload. Hetzner will happily attach a network to a running
+# server, but the GUEST only configures the interface if cloud-init sees it at
+# first boot. Attaching afterwards is a race against cloud-init writing
+# /etc/netplan/50-cloud-init.yaml, and losing it leaves a NIC the kernel can see
+# and the guest never addresses — the fleet then provisions "successfully" and
+# the private route silently does not exist. Creating with `networks:[…]` removes
+# the race rather than narrowing it.
 PRIVATE_NETWORK="${PRIVATE_NETWORK:-${SERVER_PREFIX}vnet}"
 PRIVATE_RANGE="${PRIVATE_RANGE:-10.0.0.0/16}"
 net_json="$(api GET "/networks?name=$(urlenc "$PRIVATE_NETWORK")")"
@@ -321,20 +319,89 @@ if [ "$(jq '.networks | length' <<<"$net_json")" -gt 0 ]; then
   echo "· network $PRIVATE_NETWORK exists ($PRIVATE_RANGE)"
 else
   echo "==> creating private network $PRIVATE_NETWORK ($PRIVATE_RANGE)"
-  NET_ID="$(api POST "/networks" "$(jq -nc --arg n "$PRIVATE_NETWORK" --arg r "$PRIVATE_RANGE" \
-    '{name:$n, ip_range:$r, subnets:[{type:"cloud", network_zone:"eu-central", ip_range:$r}],
+  NET_ID="$(api POST "/networks" "$(jq -nc --arg n "$PRIVATE_NETWORK" --arg r "$PRIVATE_RANGE" --arg z "$PRIVATE_NETWORK_ZONE" \
+    '{name:$n, ip_range:$r, subnets:[{type:"cloud", network_zone:$z, ip_range:$r}],
       labels:{project:"nabz"}}')" | jq -r '.network.id')"
 fi
 
+# --- create (or find) each server -------------------------------------------
+declare -A IP   # role|zone -> reachable ip (public when there is one), for NODES
+declare -A SID  # role|zone -> server id, for network attachment (private nodes only)
+for entry in "${FLEET[@]}"; do
+  IFS=: read -r suffix loc role zone etype <<<"$entry"
+  # FLEET_ROLES filter: empty = the whole fleet.
+  case ",${FLEET_ROLES:-},"  in *,,*) ;; *",$role,"*) ;; *) echo "· skipping $role (not in FLEET_ROLES)"; continue ;; esac
+  name="${SERVER_PREFIX}${suffix}"
+  type="${etype:-$SERVER_TYPE}"
+  public=0
+  if is_public "$loc"; then
+    # Only a worker can live off the private network: PocketBase is what the tunnel
+    # points at, and the evaluator has no Access path to it.
+    [ "$role" = worker ] || die "$name is a $role in '$loc' (network zone ${LOC_ZONE[$loc]}), outside $PRIVATE_NETWORK's $PRIVATE_NETWORK_ZONE. Only workers may be."
+    [ "$PUBLIC_IPV4" = true ] || die "$name in '$loc' has no private network to fall back on, so it needs PUBLIC_IPV4=true."
+    public=1
+  fi
+
+  existing="$(api GET "/servers?name=$(urlenc "$name")")"
+  if [ "$(jq '.servers | length' <<<"$existing")" -gt 0 ]; then
+    ip="$(jq -r '.servers[0].public_net.ipv4.ip // empty' <<<"$existing")"
+    echo "· $name already exists ($loc)${ip:+ — $ip}"
+  else
+    require_egress
+    echo "==> creating $name ($role${zone:+, zone=$zone}) in $loc [$type / $IMAGE]$([ "$public" = 1 ] && echo ' — public, no private network')"
+    # A public node gets neither the network (Hetzner rejects a network from
+    # another network zone at create time) nor the placement group: spread is
+    # about not sharing a physical host, and a server in another location never
+    # does.
+    body="$(jq -nc \
+      --arg name "$name" --arg type "$type" --arg image "$IMAGE" \
+      --arg loc "$loc" --arg key "$SSH_KEY_NAME" \
+      --arg role "$role" --arg zone "$zone" \
+      --argjson v4 "$PUBLIC_IPV4" --argjson v6 "$PUBLIC_IPV6" \
+      --argjson pg "$PG_ID" --arg env "$ENVIRONMENT" --argjson net "$NET_ID" \
+      --argjson public "$public" \
+      '{name:$name, server_type:$type, image:$image, location:$loc,
+        ssh_keys:[$key], public_net:{enable_ipv4:$v4, enable_ipv6:$v6},
+        labels:({project:"nabz", env:$env, role:$role} + (if $zone=="" then {} else {zone:$zone} end))}
+       + (if $public == 1 then {} else {placement_group:$pg, networks:[$net]} end)')"
+    ip="$(api POST "/servers" "$body" | jq -r '.server.public_net.ipv4.ip // empty')"
+    echo "   created${ip:+ — $ip}${ip:+}"
+    [ -n "$ip" ] || echo "   (no public IP — reachable only from inside $PRIVATE_NETWORK)"
+  fi
+  IP["${role}|${zone}"]="$ip"
+  # A public node is kept out of SID on purpose: the loop below would otherwise
+  # try to attach it to the private network, which Hetzner refuses across network
+  # zones, and the run would die after the rest of the fleet was already up.
+  if [ "$public" = 0 ]; then
+    SID["${role}|${zone}"]="$(jq -r '.servers[0].id // empty' <<<"$existing")"
+    [ -z "${SID["${role}|${zone}"]}" ] && SID["${role}|${zone}"]="$(api GET "/servers?name=$(urlenc "$name")" | jq -r '.servers[0].id')"
+  fi
+  [ "$role" = "pocketbase" ] && PB_SERVER_ID="$(jq -r '.servers[0].id // empty' <<<"$existing")"
+  [ "$role" = "pocketbase" ] && [ -z "${PB_SERVER_ID:-}" ] && PB_SERVER_ID="$(api GET "/servers?name=$(urlenc "$name")" | jq -r '.servers[0].id')"
+done
+
+# Read back each server's private ip, and attach anything that somehow lacks one.
+# Servers created above already carry the network, so the attach branch is now a
+# BACKSTOP, not the mechanism: it covers a server that predates this change, or
+# one adopted from an earlier run. It stays because it is idempotent and cheap —
+# but nothing depends on the order this loop happens to run in, which is just as
+# well, since "${!SID[@]}" iterates a bash hash and has no defined order.
+#
+# A server attached HERE rather than at creation may still need a reboot before
+# the guest configures the interface. Say so instead of reporting a private ip
+# the node cannot actually use.
 declare -A PRIVIP
 for key in "${!SID[@]}"; do
   sid="${SID[$key]}"
   [ -n "$sid" ] || continue
   cur="$(api GET "/servers/$sid" | jq -r --argjson n "$NET_ID" '.server.private_net[] | select(.network==$n) | .ip')"
   if [ -z "$cur" ]; then
-    echo "==> attaching ${key%%|*} to $PRIVATE_NETWORK"
+    echo "==> attaching ${key%%|*} to $PRIVATE_NETWORK (pre-existing server — not created with the network)"
     api POST "/servers/$sid/actions/attach_to_network" "$(jq -nc --argjson n "$NET_ID" '{network:$n}')" >/dev/null
     cur="$(api GET "/servers/$sid" | jq -r --argjson n "$NET_ID" '.server.private_net[] | select(.network==$n) | .ip')"
+    echo "   ${key%%|*} private ip: $cur  (attached post-boot — reboot the node if the private route fails)"
+    PRIVIP["$key"]="$cur"
+    continue
   fi
   PRIVIP["$key"]="$cur"
   echo "   ${key%%|*} private ip: $cur"
@@ -401,6 +468,24 @@ addr() { # role|zone
   local k="$1"
   if [ -n "${IP[$k]:-}" ]; then printf '%s' "${IP[$k]}"; else printf '%s' "${PRIVIP[$k]:-<not provisioned>}"; fi
 }
+# The anonymous "try it free" zone (#270, #522) runs on the evaluator host, which
+# has no worker of its own: without a worker in zone `free`, the landing page's
+# try form never got a result. Its own compose project, env file and health port
+# keep it apart from the evaluator, and remote-deploy.sh turns its SSRF guard on.
+#
+# One line per worker in FLEET, in FLEET order. A worker outside the private
+# network carries a trailing `public`: remote-deploy.sh then gives it the tunnel
+# URL and an Access token instead of PocketBase's private address, which it has
+# no route to.
+worker_lines() {
+  local entry _s loc role zone
+  for entry in "${FLEET[@]}"; do
+    IFS=: read -r _s loc role zone _ <<<"$entry"
+    [ "$role" = worker ] || continue
+    printf 'worker %s %s%s\n' "$(addr "worker|$zone")" "$zone" \
+      "$(is_public "$loc" && echo ' public')"
+  done
+}
 cat <<EOF
 
 Provisioning done. Store in the environment's Bitwarden project (and set PB_URL to the
@@ -409,7 +494,8 @@ PocketBase server's address once DNS/TLS is in front of it):
 NODES="
 pocketbase $(addr 'pocketbase|')
 evaluator $(addr 'evaluator|')
-worker $(addr 'worker|eu-central') eu-central
+$(worker_lines)
+worker $(addr 'evaluator|') free
 "
 
 PB_DATA_DEVICE=${vol_dev}

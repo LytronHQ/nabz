@@ -8,7 +8,8 @@
 		title?: string;
 		submitText?: string;
 		cancelText?: string;
-		submit?: any;
+		/** Runs on submit; a truthy result (or resolved value) closes the modal. */
+		submit?: () => unknown;
 		children?: import('svelte').Snippet;
 	}
 
@@ -46,8 +47,40 @@
 	function onBackdrop(e: MouseEvent) {
 		if (e.target === e.currentTarget) close();
 	}
+	// Focus moves into the dialog, Tab / Shift+Tab cycle inside it, and on close
+	// focus goes back to whatever opened it. Without the trap, Tab walked into the
+	// page behind the backdrop; without the return, a keyboard user closing the
+	// dialog landed at the top of the document.
+	const FOCUSABLE =
+		'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 	function focusOnMount(node: HTMLElement) {
+		const opener = document.activeElement as HTMLElement | null;
 		node.focus();
+		function onTab(e: KeyboardEvent) {
+			if (e.key !== 'Tab') return;
+			const items = [...node.querySelectorAll<HTMLElement>(FOCUSABLE)].filter(
+				(el) => el.offsetParent !== null || el === document.activeElement
+			);
+			if (items.length === 0) return;
+			const first = items[0];
+			const last = items[items.length - 1];
+			const active = document.activeElement as HTMLElement | null;
+			const inside = !!active && node.contains(active);
+			if (e.shiftKey && (active === first || active === node || !inside)) {
+				e.preventDefault();
+				last.focus();
+			} else if (!e.shiftKey && (active === last || !inside)) {
+				e.preventDefault();
+				first.focus();
+			}
+		}
+		node.addEventListener('keydown', onTab);
+		return {
+			destroy() {
+				node.removeEventListener('keydown', onTab);
+				if (opener && document.contains(opener)) opener.focus();
+			}
+		};
 	}
 </script>
 

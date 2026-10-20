@@ -1,4 +1,13 @@
-import type { ListResult, RecordModel } from 'pocketbase';
+// What the constructor reads from when not copying a PaginationData: a raw
+// PocketBase ListResult ({ page, perPage, totalItems }) or a load's
+// { current, size, totalItems }.
+export interface PaginationInput {
+	current?: number;
+	size?: number;
+	page?: number;
+	perPage?: number;
+	totalItems?: number;
+}
 
 export default class PaginationData {
 	current: number;
@@ -8,8 +17,7 @@ export default class PaginationData {
 		return Math.ceil(this.totalItems / this.size);
 	}
 
-	constructor(result: PaginationData);
-	constructor(result: ListResult<RecordModel> | any) {
+	constructor(result: PaginationData | PaginationInput) {
 		if (result instanceof PaginationData) {
 			this.current = result.current;
 			this.size = result.size;
@@ -17,9 +25,11 @@ export default class PaginationData {
 			return;
 		}
 
-		this.current = result.current ?? result.page;
-		this.size = result.size ?? result.perPage;
-		this.totalItems = result.totalItems;
+		// Asserted, not defaulted: an uninitialised store passes `{}`, and these
+		// have always stayed undefined in that case.
+		this.current = (result.current ?? result.page) as number;
+		this.size = (result.size ?? result.perPage) as number;
+		this.totalItems = result.totalItems as number;
 	}
 
 	get isVisible() {

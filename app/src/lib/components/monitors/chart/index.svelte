@@ -1,11 +1,11 @@
 <script lang="ts">
-	import { formatMs } from '$lib/utils/format-utils';
+	import { formatMs } from '#lib/utils/format-utils.js';
 	import {
 		monotoneSegments,
 		forwardPath,
 		reversePath,
 		type Segment
-	} from '$lib/utils/monotone-path';
+	} from '#lib/utils/monotone-path.js';
 
 	// 'phases' stacks DNS/Connect/TLS/Transfer from raw checks; 'avg' draws a single
 	// average-response area — used for the rollup-backed Week/Month ranges, which
@@ -19,6 +19,8 @@
 			tls_ms?: number;
 			ttfb_ms?: number;
 			up: boolean;
+			/** nabz could not reach the network itself (#598): not the target's latency. */
+			inconclusive?: boolean;
 		}>;
 		height?: number;
 		// have no phase breakdown.
@@ -183,8 +185,19 @@
 	}
 	const onLeave = () => (hover = null);
 	let series = $derived(mode === 'avg' ? AVG_SERIES : PHASE_SERIES);
+	// Checks taken while nabz's own network was down (#598) are left out of the
+	// bands and the axis: their ~20 s timeouts measure nabz, not the target, and
+	// drew as latency spikes that set the scale (#645). They get a muted marker
+	// on the time axis instead, matching the checks log's "Not counted".
+	let notCounted = $derived(
+		checks
+			.filter((c) => c.inconclusive)
+			.map((c) => new Date(c.checked_at).getTime())
+			.filter((t) => Number.isFinite(t))
+	);
 	let pts = $derived(
 		checks
+			.filter((c) => !c.inconclusive)
 			.map((c) => {
 				if (mode === 'avg') {
 					const ms = Math.max(0, c.response_ms ?? 0);
@@ -205,8 +218,8 @@
 			})
 			.filter((p) => Number.isFinite(p.t))
 	);
-	let tMin = $derived(pts.length ? pts[0].t : 0);
-	let tMax = $derived(pts.length ? pts[pts.length - 1].t : 1);
+	let tMin = $derived(pts.length ? Math.min(pts[0].t, ...notCounted) : 0);
+	let tMax = $derived(pts.length ? Math.max(pts[pts.length - 1].t, ...notCounted) : 1);
 	let msMax = $derived(pts.reduce((m, p) => Math.max(m, p.total), 1));
 	// Headroom over the p99, not over the max — see p99(). Never below 1, and never
 	// above the max, so a series with no outliers is scaled exactly as before.
@@ -251,7 +264,11 @@
 
 <div class="chart" bind:clientWidth={width}>
 	{#if pts.length === 0}
-		<div class="empty" style="height:{height}px">No checks in this window yet.</div>
+		<div class="empty" style="height:{height}px">
+			{notCounted.length
+				? 'Only checks that were not counted in this window.'
+				: 'No checks in this window yet.'}
+		</div>
 	{:else}
 		<svg
 			role="img"
@@ -292,24 +309,28 @@
 				     red down-dot does. Its real value is in the hover tooltip. -->
 				<path
 					class="clip-mark"
-					d="M{(xOf(p.t) - 4).toFixed(1)} {padT + 5} L{xOf(p.t).toFixed(1)} {padT} L{(xOf(p.t) + 4).toFixed(1)} {padT + 5}"
+					d="M{(xOf(p.t) - 4).toFixed(1)} {padT + 5} L{xOf(p.t).toFixed(1)} {padT} L{(
+						xOf(p.t) + 4
+					).toFixed(1)} {padT + 5}"
 				/>
 			{/each}
 
 			{#if thresholdY != null}
 				<!-- Drawn after the bands so it reads over them, before the status dots
 				     so a down marker is never hidden behind it. -->
-				<line
-					x1={padL}
-					x2={width - padR}
-					y1={thresholdY}
-					y2={thresholdY}
-					class="threshold"
-				/>
+				<line x1={padL} x2={width - padR} y1={thresholdY} y2={thresholdY} class="threshold" />
 				<text x={width - padR} y={thresholdY - 4} text-anchor="end" class="axis threshold-label">
 					{formatMs(latencyThresholdMs)}
 				</text>
 			{/if}
+
+			{#each notCounted as t, i (i)}
+				<!-- Just under the axis, not on it: on the baseline the ring sat on the
+				     bottom band's edge and blended into it. -->
+				<circle cx={xOf(t)} cy={baseline + 6} r="3" class="nc-mark">
+					<title>Not counted · {timeLabel(t)}: nabz could not reach the network</title>
+				</circle>
+			{/each}
 
 			{#each downPts as p, i (i)}
 				<circle cx={xOf(p.t)} cy={yClamped(p.total)} r="3.5" class="down-dot" />
@@ -339,6 +360,12 @@
 					{#if last}<b>{formatMs(last.seg[i])}</b>{/if}
 				</span>
 			{/each}
+			{#if notCounted.length}
+				<span class="item">
+					<span class="sw sw--nc"></span>
+					Not counted <b>{notCounted.length}</b>
+				</span>
+			{/if}
 		</div>
 
 		{#if hover}
@@ -436,6 +463,11 @@
 		color: var(--ink-3);
 		font-style: italic;
 	}
+	.nc-mark {
+		fill: var(--surface);
+		stroke: var(--ink-3);
+		stroke-width: 1.5;
+	}
 	.down-dot {
 		fill: var(--down);
 		stroke: var(--surface);
@@ -474,6 +506,11 @@
 		height: 10px;
 		border-radius: 3px;
 		flex: 0 0 10px;
+	}
+	.sw--nc {
+		border-radius: 50%;
+		background: var(--surface);
+		border: 1.5px solid var(--ink-3);
 	}
 
 	.tip {

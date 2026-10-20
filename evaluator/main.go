@@ -315,10 +315,12 @@ func buildZoneEval(zoneChecks []pb.CheckRecord, now time.Time, freshWindow time.
 	}
 
 	latest := zoneChecks[len(zoneChecks)-1]
-	if isBlockedStatus(latest.StatusCode) {
+	if isBlockedStatus(latest.StatusCode) || latest.Inconclusive {
 		// Rate-limited / blocked (429/403): the target refused to let us judge
-		// it — neither up nor down. Abstain by leaving the zone out of the fresh
-		// set, so it can't open an incident, page, or (falsely) resolve one.
+		// it — neither up nor down. Inconclusive (#598): the worker's own network
+		// failed its canaries at the time. Either way abstain, by leaving the zone
+		// out of the fresh set, so it can't open an incident, page, or (falsely)
+		// resolve one.
 		return ZoneEval{Fresh: false}
 	}
 	checkedAt, ok := parsePBTime(latest.CheckedAt)
@@ -328,8 +330,9 @@ func buildZoneEval(zoneChecks []pb.CheckRecord, now time.Time, freshWindow time.
 	for i := len(zoneChecks) - 1; i >= 0; i-- {
 		c := zoneChecks[i]
 		// A blocked check breaks the consecutive-down streak — a 429/403 must
-		// never count toward the single-zone "down" verdict.
-		if c.Up || isBlockedStatus(c.StatusCode) {
+		// never count toward the single-zone "down" verdict. Nor may a failure the
+		// worker blamed on its own network (#598).
+		if c.Up || isBlockedStatus(c.StatusCode) || c.Inconclusive {
 			break
 		}
 		trailingDown++
@@ -385,20 +388,10 @@ func reconcileIncident(pbClient *pb.Client, monitor models.Monitor, status Statu
 }
 
 // parsePBTime parses the timestamp formats PocketBase / the worker emit.
-func parsePBTime(s string) (time.Time, bool) {
-	layouts := []string{
-		"2006-01-02 15:04:05.000Z",
-		"2006-01-02 15:04:05Z",
-		time.RFC3339Nano,
-		time.RFC3339,
-	}
-	for _, l := range layouts {
-		if t, err := time.Parse(l, s); err == nil {
-			return t.UTC(), true
-		}
-	}
-	return time.Time{}, false
-}
+// parsePBTime is a local alias for pb.ParseTime. The implementation moved to
+// corelib when the worker started judging peer liveness with the same
+// timestamps; the alias keeps this package's ten call sites unchanged.
+func parsePBTime(s string) (time.Time, bool) { return pb.ParseTime(s) }
 
 func maxInt(a, b int) int {
 	if a > b {

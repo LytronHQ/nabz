@@ -1,6 +1,8 @@
 import { error, redirect } from '@sveltejs/kit';
 import type { PageServerLoad } from './$types';
-import { DefaultPageSize } from '$lib/constants';
+import { DefaultPageSize } from '#lib/constants.js';
+import { AlertChannelItem } from '#lib/models/alert-channel.js';
+import { channelTarget } from '#lib/utils/channel-display.js';
 
 export const load: PageServerLoad = async ({ locals, params, url }) => {
 	if (!locals.user) {
@@ -32,7 +34,10 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
 		channel: {
 			id: ch.id,
 			type: ch.type as string,
-			target: ch.target as string,
+			name: ((ch.name as string) || '').trim(),
+			// Already secret-safe, and read from `config`: the legacy `target` field is
+			// empty on every channel created since config existed, so this line was blank.
+			target: channelTarget(new AlertChannelItem(ch)),
 			enabled: !!ch.enabled
 		},
 		events: events.map((e) => ({

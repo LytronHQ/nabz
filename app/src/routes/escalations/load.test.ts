@@ -1,7 +1,17 @@
 import { test, expect } from 'vitest';
 import { load } from './+page.server';
 
-function fakeLocals(user: any, opts: { policyList?: any; channels?: any[] } = {}) {
+// The fakes stub only what load touches, so the event is a deliberate partial.
+type LoadEvent = Parameters<typeof load>[0];
+type LoadData = Exclude<Awaited<ReturnType<typeof load>>, void>;
+const run = async (event: object) => (await load(event as LoadEvent)) as LoadData;
+
+type FakeList = { items: object[]; page: number; perPage: number; totalItems: number };
+
+function fakeLocals(
+	user: { id: string } | null,
+	opts: { policyList?: FakeList; channels?: object[] } = {}
+) {
 	const { policyList, channels = [] } = opts;
 	return {
 		user,
@@ -21,7 +31,7 @@ test('policies paginate; channels load in full for the editor', async () => {
 		perPage: 10,
 		totalItems: 15
 	};
-	const res: any = await load({
+	const res = await run({
 		locals: fakeLocals(
 			{ id: 'u1' },
 			{
@@ -44,7 +54,7 @@ test('policies paginate; channels load in full for the editor', async () => {
 			}
 		),
 		url: new URL('http://x/escalations?page=2')
-	} as any);
+	});
 	expect(res.policies).toHaveLength(1);
 	expect(res.pagination).toEqual({ current: 2, size: 10, totalItems: 15 });
 	expect(res.channels).toHaveLength(2); // not paginated
@@ -55,7 +65,7 @@ test('policies paginate; channels load in full for the editor', async () => {
 
 test('redirects to /signin when not authenticated', async () => {
 	await expect(
-		load({ locals: fakeLocals(null), url: new URL('http://x/escalations') } as any)
+		run({ locals: fakeLocals(null), url: new URL('http://x/escalations') })
 	).rejects.toMatchObject({
 		status: 303,
 		location: '/signin'

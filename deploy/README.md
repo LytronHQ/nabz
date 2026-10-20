@@ -4,11 +4,11 @@ Two kinds of node, plus the UI:
 
 | Node | What runs | How many | Where |
 |---|---|---|---|
-| **Worker** | Valkey + worker (`deploy/worker.yml`) | one per zone (1–3 workers each) | a VPS per region (e.g. Hetzner) |
+| **Worker** | worker (`deploy/worker.yml`) | one or more per zone | a VPS per region (e.g. Hetzner), and optionally a [Fly.io machine](../fly/README.md) — whose Access token is minted locally with [`cloudflare/fly-token.sh`](cloudflare/fly-token.sh), not by CI |
 | **Evaluator** | evaluator (`deploy/central.yml`) | exactly **one** | a central host, **not** a zone VM |
 | **UI** | SvelteKit | — | Cloudflare Workers (prod/staging); a Node VM on dev |
 
-Everything talks to your hosted **PocketBase** (`PB_URL`). Nothing talks between nodes directly — the worker uses its own local Valkey, and both apps read/write PocketBase over HTTPS.
+Everything talks to your hosted **PocketBase** (`PB_URL`). Nothing talks between nodes directly, and nothing but PocketBase holds state — a worker keeps its schedule in memory, so it is a plain stateless container. Several workers in one zone coordinate only through PocketBase: each heartbeats into `worker_heartbeats`, reads the zone's roster from it, and checks only its own share.
 
 ## How deploys happen
 
@@ -18,21 +18,23 @@ Everything talks to your hosted **PocketBase** (`PB_URL`). Nothing talks between
 
 All three end in the same place: the per-role compose files (`worker.yml`, `central.yml`, `pocketbase.yml`, `web.yml`) are the single source of truth for what runs.
 
-**Hardening.** On first deploy each node is hardened once (`deploy/harden.sh`, marked by `/etc/monitors/.hardened`): **ufw** (allow SSH only — the app publishes no other ports), **unattended-upgrades** (auto security patches), **fail2ban**, and **key-only SSH** (password auth off). The SSH change is applied via a drop-in that's validated with `sshd -t` and *reloaded* (never dropping your session), and it disables passwords only — so **deploy with an SSH key** (as these guides do) and you won't be locked out. Re-run hardening any time with `sudo bash /opt/monitors/deploy/harden.sh`.
+**Hardening.** On first deploy each node is hardened once (`deploy/.ops/server.sh harden`, marked by `/etc/monitors/.hardened`): **ufw** (allow SSH only — the app publishes no other ports), **unattended-upgrades** (auto security patches), **fail2ban**, and **key-only SSH** (password auth off). The SSH change is applied via a drop-in that's validated with `sshd -t` and *reloaded* (never dropping your session), and it disables passwords only — so **deploy with an SSH key** (as these guides do) and you won't be locked out. Re-run hardening any time with `sudo bash /opt/monitors/deploy/.ops/server.sh harden`.
 
 ---
 
 ## Local development (Virtual Machine Manager / libvirt)
 
-1. **VMs:** create 1–2 Ubuntu VMs with [`deploy/vm/create-vm.virt-manager.sh`](vm/) — a minimal cloud image on the libvirt NAT network (`192.168.122.0/24`), your Launchpad SSH keys imported, ready to deploy onto:
+1. **VMs:** create Ubuntu VMs with [`deploy/vm/vmlab.sh`](vm/) — minimal cloud images on the libvirt NAT network (`192.168.122.0/24`), your SSH key authorised, ready to deploy onto:
    ```bash
-   deploy/vm/create-vm.virt-manager.sh --name mon-eu --user dev --cpu 2 --ram 2048 --disk 20 \
-     --image https://cloud-images.ubuntu.com/releases/24.04/release/ubuntu-24.04-server-cloudimg-amd64.img
+   deploy/vm/vmlab.sh create                              # the default 4-VM lab
+   deploy/vm/vmlab.sh create --name mon-eu --memory 2048 --vcpu 2 --disk 20gb
    ```
-   It prints the VM's IP. Set `SSH_USER` to that `--user` in `dev.env` (the login user has passwordless sudo).
+   It prints each VM's address. Set `SSH_USER` to the login user in `dev.env` (it has passwordless sudo; `--user` changes it).
 2. **A dev PocketBase — not production.** Run one locally so tests don't pollute prod:
    ```bash
    docker run -d -p 8090:8090 ghcr.io/muchobien/pocketbase
+   # Before the server has data, or with it stopped: a second PocketBase process
+   # against a live pb_data can delete its WAL (#520).
    docker exec -it <id> /usr/local/bin/pocketbase superuser upsert you@dev.local devpassword --dir /pb_data
    ```
    Import `infrastructure/pb_schema.json`, then create the two `service_accounts` records. Use a `PB_URL` the **VMs** can reach — your host's bridge IP (e.g. `http://192.168.122.1:8090`), not `127.0.0.1`.
@@ -89,8 +91,8 @@ file, which is what `deploy/dev.env` is for:
 | Script | Does |
 |---|---|
 | `hetzner/provision.sh` | Servers, `pb_data` volume, private network |
-| `cloudflare/tunnel.sh` | Tunnel, ingress, DNS |
-| `cloudflare/access.sh` | Access application, policy, service token |
+| `.ops/edge.sh tunnel` | Tunnel, ingress, DNS |
+| `.ops/edge.sh access` | Access application, policy, service token |
 | `remote-deploy.sh <env>` | The fleet, over SSH |
 | `hetzner/destroy.sh` | Tears it down, volume included |
 
@@ -141,7 +143,7 @@ docker compose --env-file /etc/monitors/worker.env -f /opt/monitors/deploy/worke
 
 The "try it without signing up" feature runs anonymous monitors in a **dedicated, isolated zone** so untrusted, unauthenticated traffic never touches the real `eu`/`us` workers. It's an ordinary worker node with one reserved zone name — **`free`** — which flips the worker into anon mode:
 
-- it runs the **`anon_monitors`** collection instead of `monitors` (its own `due:free` queue + its own Valkey),
+- it runs the **`anon_monitors`** collection instead of `monitors` (its own in-process schedule),
 - it enforces the **SSRF guard** (`BLOCK_PRIVATE_TARGETS=true`, set automatically for `free`), since it checks arbitrary user URLs,
 - it reaps anon monitors past the **1-hour TTL**,
 - and it publishes **no** `zone_stats`, so it stays out of the public `/api/health`.
@@ -154,6 +156,72 @@ The "try it without signing up" feature runs anonymous monitors in a **dedicated
 Uses the **same** `role=worker` service account as the other zones (the `anon_monitors` rules allow any service account). `free` is a **reserved** zone name — don't assign real monitors to it.
 
 Verify: create a trial monitor via the landing "try it" flow → `docker compose --env-file /etc/monitors/worker.env -f /opt/monitors/deploy/worker.yml logs -f` shows `[anon <id>] up=… code=…`, and the row flips `pending → up/down`. Leave it an hour → the cleanup log reports it deleted.
+
+### Replacing a worker host (#418)
+
+When a worker's server has to go — traffic allowance used up, a bad host, a move
+to a bigger plan — replace it with a fresh one in the same zone with one command.
+The zone keeps checking: the old worker is drained, the new one starts seconds
+later, and the run proves it before it calls itself done.
+
+**Manual, before:** buy the new server (Debian or Ubuntu) **with the fleet's SSH
+public key installed at creation** — every provider panel has a field for it. Note
+its address. Nothing else on it needs doing.
+
+**Run it** — the Actions workflow `replace-worker` (inputs: environment, old host,
+new host), or from a laptop:
+
+```bash
+./deploy/replace-worker.sh <env> <old_ip> <new_ip>
+```
+
+What it does, each step gating the next:
+
+1. **Preflight** — `old_ip` is a `worker` line in `NODES` (its zone and `public`
+   flag are carried over); `new_ip` answers SSH with the fleet key, runs
+   Debian/Ubuntu, is not in `NODES` and runs no worker; the PocketBase superuser
+   can log in. A refusal here changes nothing anywhere.
+2. **Bootstrap** the new host with `remote-deploy.sh` in single-node mode
+   (`ONLY_HOST=<new_ip> NO_START=1`, with `NODES` naming the new host in the old
+   one's place): hardening, Docker, the code, the worker env, the image — the
+   containers are created but **not started**. PocketBase, the schema import and
+   every other node are skipped.
+3. **Readiness** — remote-deploy's own gate, for that one node: the worker account
+   authenticates and reads monitors, and the new host has a route to PocketBase.
+4. **Drain** the old host: `docker stop` with the 30s grace, so in-flight checks
+   finish and are written (#417). Its containers are stopped, not removed.
+5. **Deregister** the old worker: its `worker_heartbeats` rows are deleted (as the
+   PocketBase superuser), so the new worker owns the whole zone from its first beat
+   rather than after the 45s roster TTL.
+6. **Start** the new worker.
+7. **Verify**, within `VERIFY_SECONDS` (75s, and never later than leaves a
+   rollback inside the evaluator's 90s dead-man threshold counted from the old
+   worker's stop): the new worker's heartbeat row is fresh, `zone_stats` was
+   written by the new worker id after the start, and a `checks` row for the zone
+   exists from after the start. No heartbeat within `FIRST_BEAT_SECONDS` (20s — a
+   healthy worker beats within a second) rolls back at once instead of waiting. (The check is only required when one is due inside the
+   deadline — a fresh worker staggers first checks by up to one interval; the
+   script predicts that from the zone's monitors and says which it used.)
+8. **On failure** after step 4: the new worker is stopped and the old one started
+   again, exactly as it was, and the run fails. `NODES` is untouched.
+9. **On success** it prints the heartbeat gap, the `zone_stats` gap, both worker
+   ids, and the new `NODES` block. The workflow also writes that block to the
+   environment's `NODES` secret (`UPDATE_NODES_SECRET=1`, using `GH_SECRETS_PAT`),
+   so the next `deploy-nodes` deploys the new host. From a laptop it is printed
+   only — set it yourself, or the next deploy-nodes redeploys the old host.
+
+**Manual, after:** delete the old server at its provider. The run ends by saying it
+is drained and safe to delete; it never calls a provider API.
+
+Limits: one worker host per run; the `free` zone is refused (it publishes no
+heartbeat or `zone_stats` to verify against); the old host must still be reachable
+(for a dead one, edit `NODES` and run `deploy-nodes`). A non-Hetzner new host needs
+a route to PocketBase first — a `public` worker line reaches it through the tunnel.
+
+`ONLY_HOST` and `NO_START` also work on their own: `ONLY_HOST=<ip>
+./deploy/remote-deploy.sh <env>` redeploys one worker or evaluator node and nothing
+else (a pocketbase address is refused); `NO_START=1` requires `ONLY_HOST` on a
+worker.
 
 ## Evaluator (one, central)
 
@@ -217,8 +285,7 @@ curl -s -H "Authorization: Bearer $HEALTH_DEBUG_TOKEN" \
 # {"status":"degraded","node":"worker-eu",
 #  "build":{"version":"0.5.0","commit":"c40711b"},
 #  "items":[
-#   {"name":"valkey","status":"unreachable","cause":"did not respond to a health probe"},
-#   {"name":"pocketbase","status":"ok"}]}
+#   {"name":"pocketbase","status":"unreachable","cause":"did not respond to a health probe"}]}
 
 curl -s -H "Authorization: Bearer $HEALTH_DEBUG_TOKEN" \
   http://<evaluator-host>:8080/health/all

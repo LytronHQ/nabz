@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
-	import { Meta } from '$lib/components/common';
+	import { Meta, ThemeToggle } from '#lib/components/common/index.js';
 
 	let { data } = $props();
 	let entries = $derived(data.entries ?? []);
@@ -17,7 +17,7 @@
 
 <Meta title="Changelog — nabz" />
 
-<div class="cl-page theme-dark">
+<div class="cl-page">
 	<div class="cl">
 		<header class="cl-nav">
 			<a class="cl-brand" href={resolve('/')}>
@@ -33,7 +33,10 @@
 				</span>
 				<b>nabz</b>
 			</a>
-			<a class="cl-back" href={resolve('/')}>← Back</a>
+			<span class="cl-nav-end">
+				<a class="cl-back" href={resolve('/')}>← Back</a>
+				<ThemeToggle />
+			</span>
 		</header>
 
 		<h1>Changelog</h1>
@@ -52,7 +55,7 @@
 							{/if}
 						{/if}
 					</div>
-					<!-- e.html is built server-side from escaped changelog text -->
+					<!-- eslint-disable-next-line svelte/no-at-html-tags -- trusted: e.html is built at build time by #lib/server/changelog from the repo's CHANGELOG.md, HTML-escaped first -->
 					<div class="cl-body">{@html e.html}</div>
 				</li>
 			{/each}
@@ -96,6 +99,11 @@
 	.cl-mark svg {
 		width: 17px;
 		height: 17px;
+	}
+	.cl-nav-end {
+		display: inline-flex;
+		align-items: center;
+		gap: 16px;
 	}
 	.cl-back {
 		color: var(--ink-2);

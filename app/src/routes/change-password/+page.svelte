@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
-	import { Meta, PageHeader } from '$lib/components/common';
+	import { Meta, PageHeader } from '#lib/components/common/index.js';
 	import type { ActionData, PageData } from './$types';
 
 	let { data, form }: { data: PageData; form: ActionData } = $props();
@@ -73,7 +73,7 @@
 				<button type="submit" class="btn btn-primary">Change password</button>
 				<!-- Always reachable, even while the gate is up: a user who cannot
 				     complete this must still be able to leave. -->
-				<a class="btn btn-ghost" href={resolve('/logout')}>Sign out</a>
+				<a class="btn btn-ghost" href={resolve('logout')}>Sign out</a>
 			</div>
 		</form>
 	</div>

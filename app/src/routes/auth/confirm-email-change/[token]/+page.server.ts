@@ -1,7 +1,8 @@
+import type { ClientResponseError } from 'pocketbase';
 import { type Actions, redirect } from '@sveltejs/kit';
 import { z } from 'zod';
 import type { PageServerLoad } from './$types';
-import { getActionFailure, getFormRecord } from '$lib/utils/action-utils';
+import { getActionFailure, getFormRecord } from '#lib/utils/action-utils.js';
 
 export const load: PageServerLoad = async () => {
 	return {};
@@ -21,8 +22,8 @@ export const actions = {
 
 		try {
 			await locals.pb?.collection('users').confirmEmailChange(token, formData.password);
-		} catch (err: any) {
-			switch (err.status) {
+		} catch (err) {
+			switch ((err as ClientResponseError).status) {
 				case 400:
 					return getActionFailure(err, 'Failed to change your email, please try again.');
 				case 403:

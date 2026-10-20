@@ -1,9 +1,9 @@
 import { test, expect } from 'vitest';
-import { render, screen, within } from '@testing-library/svelte';
+import { render, screen, within, fireEvent } from '@testing-library/svelte';
 
 import Test from './index.test.svelte';
 import { Form } from '../';
-import { AlertChannelNewItem } from '$lib/models/alert-channel';
+import { AlertChannelNewItem } from '#lib/models/alert-channel.js';
 
 test('renders the alert channel form with the webhook url', () => {
 	render(Test);
@@ -23,4 +23,17 @@ test('shows per-type credential help with a docs link (#176)', () => {
 test('shows no help block for a plain webhook (self-explanatory)', () => {
 	render(Form, { props: { data: new AlertChannelNewItem({ type: 'webhook' }) } });
 	expect(screen.queryByText(/How do I get/i)).toBeNull();
+});
+
+test('switching the type swaps the fields, as on the alerts page', async () => {
+	// The page passes a class instance held in $state. Svelte 5 does not proxy class
+	// instances, so a type change never re-rendered the fields: picking Telegram
+	// still showed "Webhook URL" in production.
+	const { default: PageLike } = await import('./index.page.test.svelte');
+	render(PageLike);
+	expect(screen.getByText('Webhook URL')).toBeInTheDocument();
+	await fireEvent.change(screen.getByRole('combobox'), { target: { value: 'telegram' } });
+	expect(screen.getByText('Bot token')).toBeInTheDocument();
+	expect(screen.getByText('Chat ID')).toBeInTheDocument();
+	expect(screen.queryByText('Webhook URL')).toBeNull();
 });

@@ -1,11 +1,11 @@
-import { json, type RequestHandler } from '@sveltejs/kit';
+import type { RequestHandler } from '@sveltejs/kit';
 import {
 	AlertChannelItem,
 	AlertChannelItemValidator,
 	toChannelConfig
-} from '$lib/models/alert-channel';
-import { failIfNoId, failIfNoResponse, failIfNoUser } from '$lib/utils/api-utils';
-import { getApiErrors } from '$lib/utils/action-utils';
+} from '#lib/models/alert-channel.js';
+import { failIfNoId, failIfNoResponse, failIfNoUser } from '#lib/utils/api-utils.js';
+import { getApiErrors } from '#lib/utils/action-utils.js';
 
 export const PATCH: RequestHandler = async ({ locals, request, params: { id } }) => {
 	failIfNoUser(locals);
@@ -26,9 +26,9 @@ export const PATCH: RequestHandler = async ({ locals, request, params: { id } })
 		});
 
 		const item = failIfNoResponse(response);
-		return json(new AlertChannelItem(item));
+		return Response.json(new AlertChannelItem(item));
 	} catch (err) {
-		return json(getApiErrors(err, `Error updating alert channel: ${id}`), { status: 500 });
+		return Response.json(getApiErrors(err, `Error updating alert channel: ${id}`), { status: 500 });
 	}
 };
 
@@ -40,6 +40,6 @@ export const DELETE: RequestHandler = async ({ locals, params: { id } }) => {
 		await locals.pb?.collection('alert_channels').delete(id);
 		return new Response(null, { status: 204 });
 	} catch (err) {
-		return json(getApiErrors(err, `Error deleting alert channel: ${id}`), { status: 500 });
+		return Response.json(getApiErrors(err, `Error deleting alert channel: ${id}`), { status: 500 });
 	}
 };

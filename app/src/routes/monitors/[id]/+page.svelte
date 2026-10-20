@@ -1,17 +1,19 @@
 <script lang="ts">
+	import type { ComponentProps } from 'svelte';
 	import { resolve } from '$app/paths';
 
-	import { invalidateAll, goto } from '$app/navigation';
-	import { usePoll } from '$lib/utils/use-poll';
-	import { latestPerZone } from '$lib/utils/latest-per-zone';
-	import { page } from '$app/stores';
-	import { Icon, Meta, StatusBadge, Pagination } from '$lib/components/common';
-	import { monitorFilters } from '$lib/stores/list-filters';
-	import { ResponseTimeChart, AvailabilityCard } from '$lib/components/monitors';
-	import { MonitorItem } from '$lib/models/monitor';
-	import { PaginationData } from '$lib/models';
-	import MonitorsStore from '$lib/stores/monitors-store';
-	import type ApiError from '$lib/models/api-error';
+	import { refreshAll, goto } from '$app/navigation';
+	import { usePoll } from '#lib/utils/use-poll.js';
+	import { latestPerZone } from '#lib/utils/latest-per-zone.js';
+	import { orderZones, zoneName } from '#lib/utils/zone-order.js';
+	import { page } from '$app/state';
+	import { Icon, Meta, StatusBadge, Pagination } from '#lib/components/common/index.js';
+	import { monitorFilters } from '#lib/stores/list-filters.js';
+	import { ResponseTimeChart, AvailabilityCard } from '#lib/components/monitors/index.js';
+	import { MonitorItem } from '#lib/models/monitor.js';
+	import { PaginationData } from '#lib/models/index.js';
+	import MonitorsStore from '#lib/stores/monitors-store.js';
+	import type ApiError from '#lib/models/api-error.js';
 	import {
 		formatUptime,
 		formatRelativeTime,
@@ -19,9 +21,9 @@
 		checkState,
 		isInMaintenance,
 		formatNextCheck
-	} from '$lib/utils/format-utils';
-	import { pushToast } from '$lib/stores/toast-store';
-	import { friendlyMessage } from '$lib/utils/api-error-utils';
+	} from '#lib/utils/format-utils.js';
+	import { pushToast } from '#lib/stores/toast-store.js';
+	import { friendlyMessage } from '#lib/utils/api-error-utils.js';
 
 	let { data } = $props();
 
@@ -73,7 +75,7 @@
 	}
 
 	// p95 of up-check response times, over any set of checks
-	function p95Of(arr: any[]): number | null {
+	function p95Of(arr: { up?: boolean; response_ms?: number | null }[]): number | null {
 		const ups = arr
 			.filter((c) => c.up && c.response_ms != null)
 			.map((c) => c.response_ms as number);
@@ -92,7 +94,9 @@
 		range === 'week' || range === 'month' ? 'avg' : 'phases'
 	);
 
-	let seriesPoints: any[] = $state([]);
+	// Rollup points from /series, in the shape the chart reads.
+	type ChartPoint = NonNullable<ComponentProps<typeof ResponseTimeChart>['checks']>[number];
+	let seriesPoints: ChartPoint[] = $state([]);
 	let seriesKey = '';
 	async function loadSeries(r: Range, zone: string) {
 		const key = `${r}:${zone}`;
@@ -122,7 +126,7 @@
 		pausing = false;
 		if (ok) {
 			pushToast('success', enabled ? 'Monitor resumed' : 'Monitor paused');
-			invalidateAll(); // reconcile status/checks in the background
+			refreshAll(); // reconcile status/checks in the background
 		} else {
 			enabled = !enabled; // revert on failure
 			pushToast('error', friendlyMessage(lastError));
@@ -173,13 +177,13 @@
 	// Revalidate immediately (immediate: true): if we arrived on a stale (e.g.
 	// hover-preloaded) snapshot, refresh it now rather than waiting for the first
 	// 10s tick (#134). The 1s tick advances the live "now"-based durations.
-	usePoll(() => invalidateAll(), 10000, { immediate: true });
+	usePoll(() => refreshAll(), 10000, { immediate: true });
 	usePoll(() => (now = Date.now()), 1000);
 	function goToTag(tag: string) {
 		// Jump to the Monitors list filtered by this tag (#142) — set the persisted
 		// filter (a #tag search) and navigate; the Monitors page restores it on mount.
 		monitorFilters.set({ q: `#${tag}`, status: '' });
-		goto(resolve('/monitors'));
+		goto(resolve('monitors'));
 	}
 	let monitor = $derived(data.monitor);
 	// The p95 the evaluator alerts on (#404). Already on the loaded monitor — the
@@ -188,7 +192,7 @@
 	// summary line below already reads. 0/null means slowness alerting is off,
 	// which the chart treats as "draw nothing".
 	let latencyThresholdMs = $derived(monitor.latencyThresholdMs ?? 0);
-	let checkinUrl = $derived(monitor?.token ? `${$page.url.origin}/ping/${monitor.token}` : '');
+	let checkinUrl = $derived(monitor?.token ? `${page.url.origin}/ping/${monitor.token}` : '');
 	let checks = $derived(data.checks ?? []);
 	// `enabled` is local + optimistic so Pause/Resume flips instantly instead of
 	// waiting on the server loader (which also refetches checks). The reactive
@@ -217,7 +221,7 @@
 			current: checksPage,
 			size: recentPageSize,
 			totalItems: checksNewest.length
-		} as any)
+		})
 	);
 	let latest = $derived(checks.length ? checks[checks.length - 1] : null);
 	let inMaint = $derived(isInMaintenance(monitor.maintenanceWindows, now));
@@ -275,12 +279,17 @@
 	let latestByZone = $derived(latestPerZone(checks as ZoneCheck[]));
 	// Prefer what the evaluator recorded; fall back to observed zones for a monitor
 	// that has never been evaluated, or one that runs everywhere.
+	// Ordered here, not taken in the order stored: see orderZones (#558).
+	let zoneLabels = $derived(data.zoneLabels ?? {});
 	let participatingZones = $derived(
-		monitor.consensusZones.length
-			? monitor.consensusZones
-			: monitor.zones.length
-				? monitor.zones
-				: [...new Set((checks as ZoneCheck[]).map((c) => c.zone).filter(Boolean))].sort()
+		orderZones(
+			monitor.consensusZones.length
+				? monitor.consensusZones
+				: monitor.zones.length
+					? monitor.zones
+					: [...new Set((checks as ZoneCheck[]).map((c) => c.zone).filter(Boolean))],
+			zoneLabels
+		)
 	);
 	let byZone: ZoneCard[] = $derived(
 		participatingZones.map((zone: string) => ({
@@ -297,8 +306,8 @@
 	// changed leaves the reader to know the consensus rules by heart.
 	let consensusNote = $derived.by(() => {
 		const total = participatingZones.length;
-		const voting = byZone.filter((z) => z.voting).map((z) => z.zone);
-		const missing = byZone.filter((z) => !z.voting).map((z) => z.zone);
+		const voting = byZone.filter((z) => z.voting).map((z) => zoneName(z.zone, zoneLabels));
+		const missing = byZone.filter((z) => !z.voting).map((z) => zoneName(z.zone, zoneLabels));
 		if (total < 2 || missing.length === 0) return null;
 		if (voting.length === 0) {
 			return `No assigned zone has reported recently (${missing.join(', ')}), so this monitor is not being checked and its status is frozen.`;
@@ -310,20 +319,22 @@
 	});
 	let p95 = $derived(p95Of(checks));
 	// --- region selector: filters the chart by zone ---
-	let zones = $derived([...new Set(checks.map((c: any) => c.zone).filter(Boolean))].sort());
+	let zones = $derived(
+		orderZones([...new Set(checks.map((c) => c.zone).filter(Boolean))] as string[], zoneLabels)
+	);
 	// if the selected zone drops out of the window on refresh, fall back to all
 	$effect(() => {
 		if (selectedZone !== 'all' && !zones.includes(selectedZone)) selectedZone = 'all';
 	});
 	let zoneChecks = $derived(
-		selectedZone === 'all' ? checks : checks.filter((c: any) => c.zone === selectedZone)
+		selectedZone === 'all' ? checks : checks.filter((c) => c.zone === selectedZone)
 	);
 	$effect(() => {
 		if (range === 'week' || range === 'month') loadSeries(range, selectedZone);
 	});
 	let displayChecks = $derived(
 		range === 'hour'
-			? zoneChecks.filter((c: any) => new Date(c.checked_at).getTime() >= Date.now() - 3_600_000)
+			? zoneChecks.filter((c) => new Date(c.checked_at).getTime() >= Date.now() - 3_600_000)
 			: range === 'day'
 				? zoneChecks
 				: seriesPoints
@@ -339,7 +350,7 @@
 
 <Meta title={monitor.name} />
 
-<div class="crumb"><a href={resolve('/monitors')}>← Monitors</a></div>
+<div class="crumb"><a href={resolve('monitors')}>← Monitors</a></div>
 
 <div class="detail-head">
 	<h1>{monitor.name}</h1>
@@ -378,7 +389,9 @@
 		heartbeat · expects a check-in every {monitor.interval}s
 	{:else}
 		{monitor.type} · {monitor.target} · every {monitor.interval}s · zones: {monitor.zones?.length
-			? monitor.zones.join(', ')
+			? orderZones(monitor.zones, zoneLabels)
+					.map((z: string) => zoneName(z, zoneLabels))
+					.join(', ')
 			: 'all'}
 	{/if}
 </div>
@@ -474,16 +487,33 @@
 				{chartMode === 'avg' ? 'Avg response time' : 'Response time by phase'}
 				<select class="zone-select" bind:value={selectedZone} aria-label="Region">
 					<option value="all">All zones</option>
-					{#each zones as z (z)}<option value={z}>{z}</option>{/each}
+					{#each zones as z (z)}<option value={z}>{zoneName(z, zoneLabels)}</option>{/each}
 				</select>
 			</span>
 			<div class="seg">
-				<button class:on={range === 'hour'} onclick={() => (range = 'hour')}>Hour</button>
-				<button class:on={range === 'day'} onclick={() => (range = 'day')}>Day</button>
-				<button class:on={range === 'week'} onclick={() => (range = 'week')}>Week</button>
-				<button class:on={range === 'month'} onclick={() => (range = 'month')}>Month</button>
+				<button
+					class:on={range === 'hour'}
+					aria-pressed={range === 'hour'}
+					onclick={() => (range = 'hour')}>Hour</button
+				>
+				<button
+					class:on={range === 'day'}
+					aria-pressed={range === 'day'}
+					onclick={() => (range = 'day')}>Day</button
+				>
+				<button
+					class:on={range === 'week'}
+					aria-pressed={range === 'week'}
+					onclick={() => (range = 'week')}>Week</button
+				>
+				<button
+					class:on={range === 'month'}
+					aria-pressed={range === 'month'}
+					onclick={() => (range = 'month')}>Month</button
+				>
 			</div>
 		</div>
+
 		<ResponseTimeChart checks={displayChecks} mode={chartMode} {latencyThresholdMs} />
 	</div>
 {/if}
@@ -506,7 +536,9 @@
 				     zone can vote with a check older than this page's window. -->
 				<div class="card zc" class:silent={!z.voting}>
 					<div class="top">
-						<b>{z.zone}</b>
+						<b title={zoneName(z.zone, zoneLabels) !== z.zone ? z.zone : undefined}
+							>{zoneName(z.zone, zoneLabels)}</b
+						>
 						{#if z.voting && z.check}
 							<StatusBadge status={checkState(z.check)} />
 						{:else}
@@ -615,16 +647,26 @@
 				{#each recent as c, i (i)}
 					<tr>
 						<td class="val mut">{formatRelativeTime(c.checked_at)}</td>
-						<td><span class="zone-tag">{c.zone}</span></td>
-						<td><StatusBadge status={checkState(c)} /></td>
+						<td>
+							<span
+								class="zone-tag"
+								title={zoneName(c.zone, zoneLabels) !== c.zone ? c.zone : undefined}
+								>{zoneName(c.zone, zoneLabels)}</span
+							>
+						</td>
+						<!-- A row is a past result, so its dot stays still: only a current
+						     status beats (#562). -->
+						<td><StatusBadge status={checkState(c)} live={false} /></td>
 						<td class="r val"
 							>{c.status_code || '—'}{#if c.redirect_count}<span
 									class="redir"
 									title="Followed {c.redirect_count} redirect{c.redirect_count === 1
 										? ''
-										: 's'} → {c.final_url}">&nbsp;↪{c.redirect_count}</span
-								>{/if}</td
-						>
+										: 's'} → {c.final_url}">↪{c.redirect_count}</span
+								>
+							{/if}
+						</td>
+
 						<td class="r val">{formatMs(c.response_ms)}</td>
 						<td class={checkState(c) === 'down' ? 'down-txt' : 'mut'} style="font-size:12px">
 							{#if c.error}

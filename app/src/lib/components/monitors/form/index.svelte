@@ -1,23 +1,39 @@
 <script lang="ts">
-	import { MonitorNewItem, MonitorTypes, isSupportedMonitorType } from '$lib/models/monitor';
-	import { Select, Toggle } from '$lib/components/common';
+	import {
+		MonitorTypes,
+		isSupportedMonitorType,
+		type MonitorNewItem,
+		type MonitorType
+	} from '#lib/models/monitor.js';
+	import type { EntityIdType } from '#lib/constants.js';
+	import { Select, Toggle } from '#lib/components/common/index.js';
 
-	type SelectOption = { value: any; name: string };
-	import { TagInput } from '$lib/components/monitors/tag-input';
+	type SelectOption = { value: string; name: string };
+	// A new monitor or a plain copy of an existing one (which adds `id`). The type
+	// is compared with '' below, the value an unset Select can hold.
+	type MonitorFormData = Omit<MonitorNewItem, 'type'> & {
+		id?: EntityIdType;
+		type: MonitorType | '';
+	};
+	import { TagInput } from '#lib/components/monitors/tag-input/index.js';
 
 	interface Props {
-		data: any;
+		data: MonitorFormData;
 		availableZones?: { zone: string; label?: string; group?: string; stale: boolean }[];
 		availablePolicies?: { id: string; name: string }[];
 		/** Per-field validation messages, keyed by field name (e.g. { name, target }). */
 		errors?: Record<string, string>;
+		/** A new monitor (the type can still be chosen) rather than an edit. Passed in,
+		 *  not read off `data` with instanceof: `data` is a plain reactive copy. */
+		isNew?: boolean;
 	}
 
 	let {
 		data = $bindable(),
 		availableZones = [],
 		availablePolicies = [],
-		errors = {}
+		errors = {},
+		isNew = false
 	}: Props = $props();
 
 	const capitalize = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
@@ -65,7 +81,7 @@
 		data.maintenanceWindows = [...(data.maintenanceWindows ?? []), { start: '', end: '' }];
 	}
 	function removeWindow(i: number) {
-		data.maintenanceWindows = data.maintenanceWindows.filter((_: any, idx: number) => idx !== i);
+		data.maintenanceWindows = data.maintenanceWindows.filter((_, idx) => idx !== i);
 	}
 	function setWindow(i: number, key: 'start' | 'end', localVal: string) {
 		data.maintenanceWindows[i] = {
@@ -130,9 +146,6 @@
 		dns: 'example.com'
 	};
 
-	// Same reason as MonitorFormPage's: `data` is rebuilt on a same-route navigation.
-	let isNew = $derived(data instanceof MonitorNewItem);
-
 	let targetLabel = $derived(targetLabels[data.type] ?? 'Target');
 	let targetPlaceholder = $derived(targetPlaceholders[data.type] ?? '');
 </script>
@@ -152,16 +165,18 @@
 	<div class="col-span-12 sm:col-span-6 relative">
 		<span class="form-lbl">Type</span>
 		{#if isNew}
-			<Select class="mt-1" items={types} bind:value={data.type} />
+			<Select class="mt-1" label="Type" items={types} bind:value={data.type} />
 			{#if comingSoonTypes.length > 0}
 				<p class="mt-1 text-xs form-hint" data-testid="coming-soon-note">
 					{comingSoonTypes.join(', ')} monitors are coming soon.
 				</p>
 			{/if}
 		{:else}
+			<!-- Same label the new-monitor select shows ("Website", not "website"). -->
 			<input
 				class="form-input mt-1 block w-full bg-[var(--surface-2)]"
-				value={data.type}
+				value={capitalize(data.type)}
+				aria-label="Type"
 				readonly
 			/>
 		{/if}
@@ -240,7 +255,12 @@
 			{#if data.type === 'website' || data.type === ''}
 				<div class="col-span-12 sm:col-span-6">
 					<span class="form-lbl">Response body check</span>
-					<Select class="mt-1" items={bodyCheckModes} bind:value={data.keywordMode} />
+					<Select
+						class="mt-1"
+						label="Response body check"
+						items={bodyCheckModes}
+						bind:value={data.keywordMode}
+					/>
 					<p class="mt-1 text-xs form-hint">
 						Fail the check even on a 200 if the page doesn't match.
 					</p>
@@ -259,7 +279,7 @@
 
 				<div class="col-span-12 sm:col-span-4">
 					<span class="form-lbl">Method</span>
-					<Select class="mt-1" items={httpMethods} bind:value={data.method} />
+					<Select class="mt-1" label="Method" items={httpMethods} bind:value={data.method} />
 				</div>
 				<label class="col-span-12 sm:col-span-4 block relative">
 					<span class="form-lbl">Expected status</span>
@@ -302,7 +322,12 @@
 			{#if data.type === 'dns'}
 				<div class="col-span-12 sm:col-span-4">
 					<span class="form-lbl">Record type</span>
-					<Select class="mt-1" items={dnsRecordTypes} bind:value={data.dnsRecordType} />
+					<Select
+						class="mt-1"
+						label="Record type"
+						items={dnsRecordTypes}
+						bind:value={data.dnsRecordType}
+					/>
 				</div>
 				<label class="col-span-12 sm:col-span-8 block relative">
 					<span class="form-lbl">Expected value (optional)</span>
@@ -408,7 +433,12 @@
 
 	<div class="col-span-12 sm:col-span-6">
 		<span class="form-lbl">Escalation policy</span>
-		<Select class="mt-1" items={policyOptions} bind:value={data.escalationPolicy} />
+		<Select
+			class="mt-1"
+			label="Escalation policy"
+			items={policyOptions}
+			bind:value={data.escalationPolicy}
+		/>
 		<p class="mt-1 text-xs form-hint">
 			How to page when this monitor is down. Manage under Escalations.
 		</p>

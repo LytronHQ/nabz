@@ -1,8 +1,16 @@
-import { error, json, type RequestHandler } from '@sveltejs/kit';
+import { error, type RequestHandler } from '@sveltejs/kit';
 import PocketBase from 'pocketbase';
-import { env } from '$env/dynamic/private';
-import { createPocketBase } from '$lib/server/pb-client';
-import { WEB_ZONE } from '$lib/server/health';
+
+import {
+	PB_URL,
+	WEB_PB_USERNAME,
+	WEB_PB_PASSWORD,
+	WEB_PB_COLLECTION,
+	HEALTH_DEBUG_TOKEN
+} from '$app/env/private';
+
+import { createPocketBase } from '#lib/server/pb-client.js';
+import { WEB_ZONE } from '#lib/server/health.js';
 
 // Path-liveness beat for heartbeat monitors (#339).
 //
@@ -27,14 +35,14 @@ import { WEB_ZONE } from '$lib/server/health';
 let servicePb: PocketBase | null = null;
 
 async function pocketbase(): Promise<PocketBase> {
-	if (!env.PB_URL || !env.WEB_PB_USERNAME || !env.WEB_PB_PASSWORD) {
+	if (!PB_URL || !WEB_PB_USERNAME || !WEB_PB_PASSWORD) {
 		throw error(503, 'not configured');
 	}
 	if (!servicePb) servicePb = createPocketBase();
 	if (!servicePb.authStore.isValid) {
 		await servicePb
-			.collection(env.WEB_PB_COLLECTION || 'service_accounts')
-			.authWithPassword(env.WEB_PB_USERNAME, env.WEB_PB_PASSWORD);
+			.collection(WEB_PB_COLLECTION || 'service_accounts')
+			.authWithPassword(WEB_PB_USERNAME, WEB_PB_PASSWORD);
 	}
 	return servicePb;
 }
@@ -44,7 +52,7 @@ export const POST: RequestHandler = async ({ request }) => {
 	// HEALTH_DEBUG_TOKEN rather than minting another secret: same blast radius
 	// (privileged observability), one fewer thing to rotate. Unset means the
 	// endpoint is off, not open.
-	const expected = env.HEALTH_DEBUG_TOKEN;
+	const expected = HEALTH_DEBUG_TOKEN;
 	if (!expected) throw error(503, 'not configured');
 	if (request.headers.get('authorization') !== `Bearer ${expected}`) throw error(404, 'Not found');
 
@@ -62,5 +70,5 @@ export const POST: RequestHandler = async ({ request }) => {
 		await pb.collection('zone_stats').create(body);
 	}
 
-	return json({ ok: true, zone: WEB_ZONE });
+	return Response.json({ ok: true, zone: WEB_ZONE });
 };

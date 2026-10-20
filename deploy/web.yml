@@ -11,6 +11,10 @@ services:
       # /changelog page). The Dockerfile lives under app/.
       context: ..
       dockerfile: app/dockerfile
+      args:
+        # SvelteKit 3's adapter-node no longer reads ORIGIN at runtime; the build
+        # bakes it into paths.origin, or every sign-in POST fails CSRF (#330).
+        ORIGIN: ${ORIGIN}
     restart: unless-stopped
     ports:
       - '3000:3000'
@@ -34,6 +38,9 @@ services:
       # Allowlist (comma/space separated) of emails that may see /admin/usage.
       # Empty = nobody. Separate from HEALTH_DEBUG_TOKEN.
       - ADMIN_EMAILS=${ADMIN_EMAILS:-}
+      # Web Push (#602): the public key devices subscribe with. Empty = the
+      # channel form says push is not set up.
+      - VAPID_PUBLIC_KEY=${VAPID_PUBLIC_KEY:-}
       # Leave NODE_ENV unset over plain http (secure cookies would break login);
       # set NODE_ENV=production once the app is behind TLS.
       - NODE_ENV=${NODE_ENV:-}

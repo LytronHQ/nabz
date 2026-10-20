@@ -74,6 +74,11 @@ func aggregateByZone(checks []pb.CheckRecord, from, to time.Time) map[string]rol
 		if !ok || t.Before(from) || !t.Before(to) {
 			continue
 		}
+		// Failed while the worker's own network was suspect (#598): not the
+		// target's downtime, and not a measurement of it either.
+		if ch.Inconclusive {
+			continue
+		}
 		a := accs[ch.Zone]
 		if a == nil {
 			a = &acc{}

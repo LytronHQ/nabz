@@ -1,8 +1,8 @@
 import { test, expect, beforeEach } from 'vitest';
 import { get } from 'svelte/store';
 import { routeSaveError } from './form-utils';
-import { toasts, dismissToast } from '$lib/stores/toast-store';
-import ApiError from '$lib/models/api-error';
+import { toasts, dismissToast } from '#lib/stores/toast-store.js';
+import ApiError from '#lib/models/api-error.js';
 
 beforeEach(() => {
 	for (const t of get(toasts)) dismissToast(t.id);

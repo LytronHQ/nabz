@@ -1,5 +1,7 @@
 import { error, redirect } from '@sveltejs/kit';
 import type { PageServerLoad } from './$types';
+import { getZoneLabels } from '#lib/server/zones.js';
+import { nameZonesInText, zoneName } from '#lib/utils/zone-order.js';
 
 export const load: PageServerLoad = async ({ locals, params }) => {
 	if (!locals.user) {
@@ -19,6 +21,7 @@ export const load: PageServerLoad = async ({ locals, params }) => {
 		throw error(404, 'Incident not found');
 	}
 
+	const labels = await getZoneLabels(locals.pb!);
 	const events = await locals
 		.pb!.collection('incident_events')
 		.getFullList({
@@ -32,8 +35,8 @@ export const load: PageServerLoad = async ({ locals, params }) => {
 		events: events.map((e) => ({
 			id: e.id,
 			type: e.type as string,
-			message: e.message as string,
-			zone: (e.zone as string) || '',
+			message: nameZonesInText((e.message as string) ?? '', labels),
+			zone: e.zone ? zoneName(e.zone as string, labels) : '',
 			author: (e.author as string) || '',
 			created: e.created as string
 		})),
@@ -41,7 +44,7 @@ export const load: PageServerLoad = async ({ locals, params }) => {
 			id: record.id,
 			started_at: record.started_at,
 			resolved_at: record.resolved_at || null,
-			cause: record.cause || '',
+			cause: nameZonesInText(record.cause || '', labels),
 			acknowledged_at: record.acknowledged_at || null,
 			acknowledged_by: record.acknowledged_by || '',
 			escalated_at: record.escalated_at || null

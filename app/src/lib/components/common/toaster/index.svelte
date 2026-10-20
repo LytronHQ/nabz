@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { toasts, dismissToast, type Toast } from '$lib/stores/toast-store';
+	import { toasts, dismissToast, type Toast } from '#lib/stores/toast-store.js';
 	import { fly } from 'svelte/transition';
 
 	const glyph: Record<Toast['type'], string> = {

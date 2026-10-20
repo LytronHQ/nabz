@@ -1,36 +1,27 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
-	import { invalidateAll, goto } from '$app/navigation';
-	import { Meta, Pagination, Pill } from '$lib/components/common';
-	import { PaginationData } from '$lib/models';
-	import { formatRelativeTime } from '$lib/utils/format-utils';
+	import { refreshAll, goto } from '$app/navigation';
+	import { Meta, Pagination, Pill } from '#lib/components/common/index.js';
+	import { PaginationData } from '#lib/models/index.js';
+	import { formatRelativeTime } from '#lib/utils/format-utils.js';
 
 	let { data } = $props();
 
 	let channel = $derived(data.channel);
 	let events = $derived(data.events ?? []);
-	let pagination = $derived(new PaginationData(data.pagination as any));
+	let pagination = $derived(new PaginationData(data.pagination));
 	function onPage(detail: { page: number }) {
 		// eslint-disable-next-line svelte/no-navigation-without-resolve -- the path is resolve()d inside this template literal
-		goto(`${resolve('/alerts/[id]', { id: channel.id })}?page=${detail.page}`, { noScroll: true });
-	}
-
-	// Targets are secrets — show host + short tail, not the full URL. Full value
-	// lives in the Edit form on /alerts.
-	function maskTarget(type: string, target: string): string {
-		if (type === 'email' || !target) return target;
-		try {
-			const host = new URL(target).host;
-			return `${host} · …${target.replace(/\/+$/, '').slice(-6)}`;
-		} catch {
-			return target;
-		}
+		goto(`${resolve('/alerts/[id]', { id: channel.id })}?page=${detail.page}`, { reset: false });
 	}
 
 	const KIND_LABEL: Record<string, string> = {
 		test: 'Test',
 		incident: 'Incident',
-		recovery: 'Recovery'
+		recovery: 'Recovery',
+		cert: 'Certificate',
+		latency: 'Latency',
+		domain: 'Domain'
 	};
 
 	let testing = $state(false);
@@ -52,16 +43,22 @@
 			testError = 'Test failed';
 		}
 		testing = false;
-		await invalidateAll(); // the new test delivery shows up in the log
+		await refreshAll(); // the new test delivery shows up in the log
 	}
 </script>
 
-<Meta title="Channel · {channel.type}" />
+<Meta title="Channel · {channel.name || channel.type}" />
 
-<div class="crumb"><a href={resolve('/alerts')}>← Alert channels</a></div>
+<div class="crumb"><a href={resolve('alerts')}>← Alert channels</a></div>
 
 <div class="detail-head">
-	<h1 style="text-transform:capitalize">{channel.type}</h1>
+	<!-- The name, not the type: with two webhook channels both pages read "Webhook". -->
+	{#if channel.name}
+		<h1>{channel.name}</h1>
+		<span class="zone-tag">{channel.type}</span>
+	{:else}
+		<h1 style="text-transform:capitalize">{channel.type}</h1>
+	{/if}
 	{#if channel.enabled}
 		<Pill tone="up" label="On" />
 	{:else}
@@ -76,22 +73,26 @@
 					stroke="currentColor"
 					stroke-width="1.8"
 					stroke-linecap="round"
-					stroke-linejoin="round"><path d="M22 2L11 13" /><path d="M22 2l-7 20-4-9-9-4z" /></svg
+					stroke-linejoin="round"
 				>
+					<path d="M22 2L11 13"></path>
+					<path d="M22 2l-7 20-4-9-9-4z"></path>
+				</svg>
+
 				{testing ? 'Sending…' : 'Send test'}
 			</button>
 		{/if}
 	</div>
 </div>
 <div class="mono" style="color:var(--ink-3);font-size:12.5px">
-	{maskTarget(channel.type, channel.target)}
+	{channel.target}
 </div>
 {#if testError}<div class="down-txt" style="font-size:12.5px;margin-top:6px">{testError}</div>{/if}
 
 <div class="card" style="margin-top:16px">
 	<div class="card__h">
 		<h3>Delivery log</h3>
-		<span class="hint">tests + incident &amp; recovery alerts · last 90 days</span>
+		<span class="hint">every alert and test sent here · last 90 days</span>
 	</div>
 	<ul class="log">
 		{#each events as ev (ev.id)}

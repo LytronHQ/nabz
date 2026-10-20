@@ -1,0 +1,87 @@
+name: replace-worker
+
+# Replaces one worker host with another in the same zone (#418): bootstraps the
+# new host without starting it, drains the old one, starts the new one, verifies
+# it inside the dead-man window, and rolls back to the old host if it does not
+# verify. On success it rewrites the NODES secret so the next deploy-nodes deploys
+# the new host. See deploy/README.md, "Replacing a worker host".
+#
+# Manual before: buy the new server with the fleet's SSH public key installed.
+# Manual after: delete the old server at its provider (this run never does).
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Target environment
+        type: environment
+        required: true
+      old_host:
+        description: Address of the worker to replace (as it appears in NODES)
+        type: string
+        required: true
+      new_host:
+        description: Address of the new server (fleet SSH key installed, Debian/Ubuntu)
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+# One replacement per environment at a time: two runs would each read the same
+# NODES and the second write would undo the first. (deploy-nodes is not in this
+# group — do not run it while a replacement is in progress.)
+concurrency:
+  group: replace-worker-${{ inputs.environment }}
+  cancel-in-progress: false
+
+jobs:
+  replace:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install bws
+        uses: ./.github/actions/bws
+
+      # The environment is materialized exactly as deploy-nodes does it: Bitwarden
+      # for configuration, plus the infra outputs and generated credentials that
+      # only exist as environment secrets. See deploy-nodes.yml for why each one
+      # is passed explicitly.
+      - name: Replace
+        env:
+          ENV_NAME: ${{ inputs.environment }}
+          OLD_HOST: ${{ inputs.old_host }}
+          NEW_HOST: ${{ inputs.new_host }}
+          BWS_ACCESS_TOKEN: ${{ secrets.BWS_ACCESS_TOKEN }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          NODES: ${{ secrets.NODES }}
+          PB_URL: ${{ secrets.PB_URL }}
+          PB_BIND_IP: ${{ secrets.PB_BIND_IP }}
+          PB_DATA_DEVICE: ${{ secrets.PB_DATA_DEVICE }}
+          PRIVATE_SUBNET: ${{ secrets.PRIVATE_SUBNET }}
+          TUNNEL_TOKEN: ${{ secrets.TUNNEL_TOKEN }}
+          WORKER_CF_ACCESS_CLIENT_ID: ${{ secrets.WORKER_CF_ACCESS_CLIENT_ID }}
+          WORKER_CF_ACCESS_CLIENT_SECRET: ${{ secrets.WORKER_CF_ACCESS_CLIENT_SECRET }}
+          PB_SUPERUSER_PASSWORD: ${{ secrets.PB_SUPERUSER_PASSWORD }}
+          WORKER_PB_PASSWORD: ${{ secrets.WORKER_PB_PASSWORD }}
+          EVALUATOR_PB_PASSWORD: ${{ secrets.EVALUATOR_PB_PASSWORD }}
+          HEALTH_DEBUG_TOKEN: ${{ secrets.HEALTH_DEBUG_TOKEN }}
+          PKCE_FLOW_ENCRYPTION_KEY: ${{ secrets.PKCE_FLOW_ENCRYPTION_KEY }}
+          # Rewriting NODES needs a token that can write environment secrets; the
+          # job's GITHUB_TOKEN cannot. Same PAT infra-hetzner writes NODES with.
+          GH_TOKEN: ${{ secrets.GH_SECRETS_PAT }}
+          UPDATE_NODES_SECRET: "1"
+        run: |
+          set -euo pipefail
+          [ -n "$BWS_ACCESS_TOKEN" ] || { echo "::error::BWS_ACCESS_TOKEN is not set for this environment"; exit 1; }
+          [ -n "$NODES" ] || { echo "::error::NODES is empty — run infra-hetzner for this environment first"; exit 1; }
+          for v in PB_SUPERUSER_PASSWORD WORKER_PB_PASSWORD; do
+            [ -n "${!v}" ] || { echo "::error::$v is empty — run bootstrap-credentials for this environment first"; exit 1; }
+          done
+          # Checked before anything is touched: finding out after a successful
+          # replacement that NODES cannot be rewritten leaves the next deploy-nodes
+          # pointed at the drained host.
+          [ -n "$GH_TOKEN" ] || { echo "::error::GH_SECRETS_PAT is not set for this environment — NODES could not be updated"; exit 1; }
+          ./deploy/replace-worker.sh "$ENV_NAME" "$OLD_HOST" "$NEW_HOST"

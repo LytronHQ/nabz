@@ -164,4 +164,10 @@ type CheckResult struct {
 	// still decides up/down.
 	RedirectCount int
 	FinalURL      string
+	// Inconclusive marks a failed check the worker could not attribute to the
+	// target: right after it failed, the worker's own canary probes failed too, so
+	// its network was suspect (#598). Persisted; the evaluator abstains on it and
+	// uptime leaves it out, so nabz's own trouble never counts as the site's
+	// downtime. A failure with healthy canaries is the site's, in that zone.
+	Inconclusive bool
 }

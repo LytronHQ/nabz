@@ -1,4 +1,4 @@
-import { serviceClient } from '$lib/server/service-pb';
+import { serviceClient } from '#lib/server/service-pb.js';
 
 // Migrate-on-signup (#272, epic #265). Move a visitor's anonymous trial monitor(s)
 // from `anon_monitors` into the real `monitors` collection under their new

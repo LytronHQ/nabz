@@ -5,7 +5,7 @@
 # not a third-party :latest image. PB_VERSION (+ optional PB_SHA256) come from
 # the environment / pocketbase.env so the built image is reproducible.
 #
-#   PB_VERSION=0.28.4 docker compose -f deploy/pocketbase.yml up -d --build
+#   PB_VERSION=0.40.5 docker compose -f deploy/pocketbase.yml up -d --build
 name: monitors-pocketbase
 
 services:
@@ -13,9 +13,9 @@ services:
     build:
       context: ./pocketbase
       args:
-        PB_VERSION: ${PB_VERSION:-0.28.4}
+        PB_VERSION: ${PB_VERSION:-0.40.5}
         PB_SHA256: ${PB_SHA256:-}
-    image: nabz-pocketbase:${PB_VERSION:-0.28.4}
+    image: nabz-pocketbase:${PB_VERSION:-0.40.5}
     restart: unless-stopped
     ports:
       # On prod PB_BIND_IP is the host's PRIVATE network address, so PocketBase

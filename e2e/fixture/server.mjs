@@ -24,6 +24,13 @@
 //                                  (default "keyword") — for body/keyword asserts
 //   *    /echo                   -> 200 JSON of {method, path, headers, body}
 //                                  — for asserting custom method/headers
+//   GET  /canary                 -> 204, or a dropped connection after POST /canary/down
+//   POST /canary/down|up         -> the worker's "is it us?" probe fails / works (#598)
+//   POST /oauth/github/next      -> sets the identity the next sign-in returns
+//   GET  /oauth/github/authorize -> 302 back to redirect_uri with a code (or an error)
+//   POST /oauth/github/token     -> exchanges that code for a token
+//   GET  /oauth/github/user      -> the identity behind the token (GitHub's /user shape)
+//   GET  /oauth/avatar.png       -> a 1x1 PNG, the identity's avatar
 //   *    (anything else)         -> 404
 
 import http from 'node:http';
@@ -35,6 +42,22 @@ const MAX_SLOW_MS = 60_000;
 
 // Last webhook payload received per /hook/:id (the webhook-channel receiver).
 const hooks = new Map();
+// Last Web Push request per /push/:id (#602): the encrypted body as base64 plus
+// the headers a push service reads, so the test can decrypt what nabz sent.
+const pushes = new Map();
+const PUSH_HEADERS = ['content-encoding', 'ttl', 'urgency', 'topic', 'authorization'];
+
+// A stand-in for GitHub's OAuth endpoints (#609), so the sign-in journey runs
+// against PocketBase's real github provider with only its URLs overridden. The
+// one piece of state: the identity the next authorize hands out, set by the test
+// with POST /oauth/github/next. A code and its token map back to that identity.
+const oauthCodes = new Map();
+let canaryDown = false;
+let oauthNext = null;
+const AVATAR_PNG = Buffer.from(
+	'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYPj/HwADAgH/hHmZOgAAAABJRU5ErkJggg==',
+	'base64'
+);
 
 function send(res, status, body, headers = {}) {
 	res.writeHead(status, { 'content-type': 'text/plain; charset=utf-8', ...headers });
@@ -51,7 +74,7 @@ async function readBody(req) {
 async function handle(req, res, url) {
 	const p = url.pathname;
 
-	if (p === '/' ) return send(res, 200, 'fixture: ok');
+	if (p === '/') return send(res, 200, 'fixture: ok');
 	if (p === '/health') return send(res, 200, 'ok');
 
 	// Webhook receiver — a test-owned endpoint that records the last payload posted
@@ -69,6 +92,107 @@ async function handle(req, res, url) {
 		if (stored === undefined) return send(res, 404, 'no payload yet');
 		return send(res, 200, stored, { 'content-type': 'application/json; charset=utf-8' });
 	}
+
+	// Push service stand-in (#602). POST answers 201 like FCM/APNs and keeps the
+	// raw bytes (the body is aes128gcm ciphertext, which readBody's utf8 decode
+	// would corrupt); GET returns { headers, body } with body in base64.
+	const push = p.match(/^\/push\/([\w-]+)$/);
+	if (push) {
+		const id = push[1];
+		if (req.method === 'POST') {
+			const chunks = [];
+			for await (const c of req) chunks.push(c);
+			const headers = Object.fromEntries(PUSH_HEADERS.map((h) => [h, req.headers[h] ?? '']));
+			pushes.set(id, { headers, body: Buffer.concat(chunks).toString('base64') });
+			return send(res, 201, '');
+		}
+		const stored = pushes.get(id);
+		if (!stored) return send(res, 404, 'no push yet');
+		return send(res, 200, JSON.stringify(stored), {
+			'content-type': 'application/json; charset=utf-8'
+		});
+	}
+
+	// The e2e workers' only canary (WORKER_CANARY_URLS): down, it drops the
+	// connection, which is what a worker whose own network is gone sees (#598).
+	if (p === '/canary') {
+		if (canaryDown) return req.socket.destroy();
+		return send(res, 204, '');
+	}
+	if ((p === '/canary/down' || p === '/canary/up') && req.method === 'POST') {
+		canaryDown = p === '/canary/down';
+		return send(res, 200, canaryDown ? 'down' : 'up');
+	}
+
+	if (p === '/oauth/github/next' && req.method === 'POST') {
+		oauthNext = JSON.parse((await readBody(req)) || '{}');
+		return send(res, 200, 'ok');
+	}
+	if (p === '/oauth/github/authorize') {
+		const back = new URL(url.searchParams.get('redirect_uri') || '');
+		back.searchParams.set('state', url.searchParams.get('state') || '');
+		if (!oauthNext || oauthNext.deny) {
+			// What GitHub sends when the user clicks Cancel on its consent page.
+			back.searchParams.set('error', 'access_denied');
+		} else {
+			const code = `code-${oauthCodes.size + 1}-${Date.now()}`;
+			oauthCodes.set(code, oauthNext);
+			back.searchParams.set('code', code);
+		}
+		oauthNext = null;
+		return send(res, 302, '', { location: back.toString() });
+	}
+	if (p === '/oauth/github/token' && req.method === 'POST') {
+		const form = new URLSearchParams(await readBody(req));
+		// Like GitHub, refuse a token request without the client secret (in the
+		// Basic auth header or the body). Production sign-in once sent none, and a
+		// fake that accepted that could not catch it.
+		const basic = (req.headers.authorization || '').match(/^Basic (.+)$/i);
+		const headerSecret = basic ? Buffer.from(basic[1], 'base64').toString().split(':')[1] : '';
+		if (!headerSecret && !form.get('client_secret')) {
+			return send(res, 200, JSON.stringify({ error: 'incorrect_client_credentials' }), {
+				'content-type': 'application/json'
+			});
+		}
+		const code = form.get('code') || '';
+		if (!oauthCodes.has(code))
+			return send(res, 400, JSON.stringify({ error: 'bad_verification_code' }));
+		return send(
+			res,
+			200,
+			JSON.stringify({
+				access_token: `tok-${code}`,
+				token_type: 'bearer',
+				scope: 'read:user,user:email'
+			}),
+			{
+				'content-type': 'application/json'
+			}
+		);
+	}
+	if (p === '/oauth/github/user' || p === '/oauth/github/user/emails') {
+		const token = (req.headers.authorization || '').replace(/^(Bearer|token) /i, '');
+		const who = oauthCodes.get(token.replace(/^tok-/, ''));
+		if (!who) return send(res, 401, 'bad token');
+		if (p.endsWith('/emails')) {
+			return send(res, 200, JSON.stringify([{ email: who.email, verified: true, primary: true }]), {
+				'content-type': 'application/json'
+			});
+		}
+		return send(
+			res,
+			200,
+			JSON.stringify({
+				id: who.id,
+				login: who.login,
+				name: who.name,
+				email: who.email,
+				avatar_url: who.avatarUrl ?? ''
+			}),
+			{ 'content-type': 'application/json' }
+		);
+	}
+	if (p === '/oauth/avatar.png') return send(res, 200, AVATAR_PNG, { 'content-type': 'image/png' });
 
 	// /status/:code — exact status echo. Rate-limit/unavailable carry Retry-After.
 	const status = p.match(/^\/status\/(\d{3})$/);
@@ -118,7 +242,12 @@ async function handle(req, res, url) {
 		return send(
 			res,
 			200,
-			JSON.stringify({ method: req.method, path: url.pathname + url.search, headers: req.headers, body }),
+			JSON.stringify({
+				method: req.method,
+				path: url.pathname + url.search,
+				headers: req.headers,
+				body
+			}),
 			{ 'content-type': 'application/json; charset=utf-8' }
 		);
 	}
@@ -140,6 +269,11 @@ const server = http.createServer((req, res) => {
 let tcpServer = null;
 if (TCP_PORT > 0) {
 	tcpServer = net.createServer((socket) => {
+		// A port check is free to reset the connection (RST) instead of reading the
+		// banner. Without a listener, that ECONNRESET is an unhandled 'error' event
+		// and kills the whole fixture — and every later journey fails on a name that
+		// no longer resolves.
+		socket.on('error', () => {});
 		socket.write('fixture-tcp\n');
 		socket.end();
 	});
@@ -150,7 +284,9 @@ export function start() {
 	return new Promise((resolve) => {
 		server.listen(PORT, () => {
 			if (tcpServer) {
-				tcpServer.listen(TCP_PORT, () => resolve({ server, tcpServer, port: PORT, tcpPort: TCP_PORT }));
+				tcpServer.listen(TCP_PORT, () =>
+					resolve({ server, tcpServer, port: PORT, tcpPort: TCP_PORT })
+				);
 			} else {
 				resolve({ server, tcpServer: null, port: PORT, tcpPort: 0 });
 			}

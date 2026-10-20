@@ -1,6 +1,6 @@
-import { json, type RequestHandler } from '@sveltejs/kit';
-import { failIfNoId, failIfNoUser } from '$lib/utils/api-utils';
-import { getApiErrors } from '$lib/utils/action-utils';
+import type { RequestHandler } from '@sveltejs/kit';
+import { failIfNoId, failIfNoUser } from '#lib/utils/api-utils.js';
+import { getApiErrors } from '#lib/utils/action-utils.js';
 
 export const DELETE: RequestHandler = async ({ locals, params: { id } }) => {
 	failIfNoUser(locals);
@@ -10,6 +10,6 @@ export const DELETE: RequestHandler = async ({ locals, params: { id } }) => {
 		await locals.pb?.collection('dependencies').delete(id);
 		return new Response(null, { status: 204 });
 	} catch (err) {
-		return json(getApiErrors(err, `Error deleting dependency: ${id}`), { status: 500 });
+		return Response.json(getApiErrors(err, `Error deleting dependency: ${id}`), { status: 500 });
 	}
 };

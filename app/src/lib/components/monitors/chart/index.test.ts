@@ -95,7 +95,11 @@ function series(n: number, normal: number, ...spikes: number[]) {
 // are drawn from yTop, so a capped axis produces small numbers and an
 // outlier-driven one produces huge ones.
 const topTick = (container: HTMLElement) =>
-	Math.max(...[...container.querySelectorAll('text.axis')].map((t) => Number(t.textContent)).filter(Number.isFinite));
+	Math.max(
+		...[...container.querySelectorAll('text.axis')]
+			.map((t) => Number(t.textContent))
+			.filter(Number.isFinite)
+	);
 
 test('one timeout no longer sets the scale for the whole chart', () => {
 	const { container } = render(Chart, { checks: series(200, 90, 22000) });
@@ -189,4 +193,23 @@ test('a single check still renders without a curve', () => {
 		checks: [{ checked_at: '2024-01-01T00:00:00Z', response_ms: 90, up: true }]
 	});
 	expect(container.querySelector('svg')).toBeInTheDocument();
+});
+
+// #645: a check stored inconclusive (nabz's own network was down, #598) timed out
+// at ~20 s. Plotted as latency it drew a spike and set the axis; it is now left
+// out of the bands and marked on the time axis instead.
+test('leaves inconclusive checks out of the latency scale and marks them', () => {
+	const checks = [
+		{ checked_at: '2024-01-01T00:00:00Z', response_ms: 100, up: true },
+		{ checked_at: '2024-01-01T00:01:00Z', response_ms: 20000, up: false, inconclusive: true },
+		{ checked_at: '2024-01-01T00:02:00Z', response_ms: 200, up: true }
+	];
+	const { container } = render(Chart, { checks });
+
+	const ticks = [...container.querySelectorAll('text.axis')].map((t) => Number(t.textContent));
+	expect(Math.max(...ticks.filter(Number.isFinite))).toBeLessThan(1000);
+	expect(container.querySelectorAll('circle.down-dot').length).toBe(0);
+	expect(container.querySelectorAll('.clip-mark').length).toBe(0);
+	expect(container.querySelectorAll('circle.nc-mark').length).toBe(1);
+	expect(container.querySelector('.legend')?.textContent).toMatch(/Not counted\s*1/);
 });

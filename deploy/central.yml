@@ -27,6 +27,10 @@ services:
       - SMTP_PASSWORD=${SMTP_PASSWORD:-}
       - SMTP_FROM=${SMTP_FROM:-}
       - OPS_WEBHOOK_URL=${OPS_WEBHOOK_URL:-}
+      # Web Push alerts (#602): unset keys = push channels skipped.
+      - VAPID_PUBLIC_KEY=${VAPID_PUBLIC_KEY:-}
+      - VAPID_PRIVATE_KEY=${VAPID_PRIVATE_KEY:-}
+      - VAPID_SUBJECT=${VAPID_SUBJECT:-}
       # External dead-man's switch: unset = off.
       - HEALTHCHECK_PING_URL=${HEALTHCHECK_PING_URL:-}
       - DEADMAN_SECONDS=${DEADMAN_SECONDS:-90}

@@ -1,11 +1,13 @@
 <script lang="ts">
+	import { VERSION_LABEL } from '#lib/version.js';
+	import type { RecordModel } from 'pocketbase';
 	import { resolve } from '$app/paths';
-	import { page } from '$app/stores';
-	import { Appearance } from '$lib/components/common/appearance';
-	import { Icon } from '$lib/components/common/icon';
+	import { page } from '$app/state';
+	import { Appearance } from '#lib/components/common/appearance/index.js';
+	import { Icon } from '#lib/components/common/icon/index.js';
 
 	interface Props {
-		user?: any;
+		user?: RecordModel | null;
 		isAdmin?: boolean;
 	}
 
@@ -13,12 +15,12 @@
 
 	// Take `path` as an argument so the template expression depends on it and
 	// re-evaluates on navigation (Svelte doesn't trace vars used inside a fn body).
-	let path = $derived($page.url.pathname);
+	let path = $derived(page.url.pathname);
 	const isActive = (p: string, href: string) => (href === '/' ? p === '/' : p.startsWith(href));
 </script>
 
 <aside class="side">
-	<a class="brand" href={resolve('/dashboard')}>
+	<a class="brand" href={resolve('dashboard')}>
 		<span class="mark">
 			<svg
 				viewBox="0 0 24 24"
@@ -26,7 +28,7 @@
 				stroke="#fff"
 				stroke-width="2.4"
 				stroke-linecap="round"
-				stroke-linejoin="round"><path d="M3 12h4l2.5-7 5 14 2.5-7H21" /></svg
+				stroke-linejoin="round"><path d="M3 12h4l2.5-7 5 14 2.5-7H21"></path></svg
 			>
 		</span>
 		<b>nabz</b>
@@ -34,7 +36,7 @@
 
 	<nav class="nav">
 		<a
-			href={resolve('/dashboard')}
+			href={resolve('dashboard')}
 			class:active={isActive(path, '/dashboard')}
 			aria-current={isActive(path, '/dashboard') ? 'page' : undefined}
 		>
@@ -42,7 +44,7 @@
 			Dashboard
 		</a>
 		<a
-			href={resolve('/monitors')}
+			href={resolve('monitors')}
 			class:active={isActive(path, '/monitors')}
 			aria-current={isActive(path, '/monitors') ? 'page' : undefined}
 		>
@@ -50,7 +52,7 @@
 			Monitors
 		</a>
 		<a
-			href={resolve('/incidents')}
+			href={resolve('incidents')}
 			class:active={isActive(path, '/incidents')}
 			aria-current={isActive(path, '/incidents') ? 'page' : undefined}
 		>
@@ -58,7 +60,7 @@
 			Incidents
 		</a>
 		<a
-			href={resolve('/alerts')}
+			href={resolve('alerts')}
 			class:active={isActive(path, '/alerts')}
 			aria-current={isActive(path, '/alerts') ? 'page' : undefined}
 		>
@@ -66,7 +68,7 @@
 			Alerts
 		</a>
 		<a
-			href={resolve('/escalations')}
+			href={resolve('escalations')}
 			class:active={isActive(path, '/escalations')}
 			aria-current={isActive(path, '/escalations') ? 'page' : undefined}
 		>
@@ -75,7 +77,7 @@
 		</a>
 		{#if isAdmin}
 			<a
-				href={resolve('/admin/usage')}
+				href={resolve('admin/usage')}
 				class:active={isActive(path, '/admin')}
 				aria-current={isActive(path, '/admin') ? 'page' : undefined}
 			>
@@ -87,13 +89,11 @@
 
 	<div class="side__foot">
 		<Appearance />
-		<a href={resolve('/logout')} class="nav-signout">
-			<Icon name="signout" />
-			Sign out
-		</a>
+		<a href={resolve('logout')} class="nav-signout"><Icon name="signout" />Sign out</a>
+
 		<a
 			class="side__user"
-			href={resolve('/account')}
+			href={resolve('account')}
 			class:active={isActive(path, '/account')}
 			aria-current={isActive(path, '/account') ? 'page' : undefined}
 		>
@@ -108,10 +108,20 @@
 				<span>{user?.email || ''}</span>
 			</span>
 		</a>
+		<!-- Which build this is, in the nodes' format (#489). -->
+		<span class="side__ver" title="Web build">{VERSION_LABEL}</span>
 	</div>
 </aside>
 
 <style>
+	.side__ver {
+		display: block;
+		padding: 6px 11px 0;
+		font-variant-numeric: tabular-nums;
+		font-size: 10.5px;
+		color: var(--ink-3);
+		letter-spacing: 0.02em;
+	}
 	.nav-signout {
 		display: flex;
 		align-items: center;

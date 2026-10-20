@@ -1,6 +1,6 @@
 import { redirect } from '@sveltejs/kit';
 import type { PageServerLoad } from './$types';
-import { DefaultPageSize } from '$lib/constants';
+import { DefaultPageSize } from '#lib/constants.js';
 
 // Server-render the first page of the user's monitors so the list is present on
 // navigation instead of flashing the empty/placeholder state while a client-side

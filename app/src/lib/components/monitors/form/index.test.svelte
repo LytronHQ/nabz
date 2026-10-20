@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { MonitorItem, MonitorNewItem } from '$lib/models/monitor';
+	import { MonitorItem, MonitorNewItem } from '#lib/models/monitor.js';
 	import { Form } from '../';
 
 	const newData = new MonitorNewItem({
@@ -23,6 +23,7 @@
 <div data-testid="new-data">
 	<Form
 		data={newData}
+		isNew
 		availableZones={[
 			{ zone: 'eu', stale: false },
 			{ zone: 'us', stale: true }
