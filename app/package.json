@@ -36,7 +36,7 @@
 		"@types/d3-zoom": "^3.0.8",
 		"@types/node": "^26.2.0",
 		"@vitest/coverage-v8": "^5.0.4",
-		"@vitest/ui": "^5.0.4",
+		"@vitest/ui": "^5.0.5",
 		"change-case": "^5.4.4",
 		"crypto-js": "^4.2.0",
 		"eslint": "^10.9.0",
