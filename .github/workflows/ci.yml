@@ -1,8 +1,9 @@
 name: CI
 
 # Documentation-only changes skip CI entirely: a README or docs/ edit cannot break
-# a Go test or a vitest run, and a full matrix costs ~5 billed minutes on the PR
-# plus ~6 more on the merge. Any non-doc file in the same push brings CI back.
+# a Go test or a vitest run, and a full run costs ~5 billed minutes on the PR. Any
+# non-doc file in the same push brings CI back. (The merge itself costs 1 minute
+# when its PR run already proved its tree: see the `tested` job.)
 on:
   pull_request:
     paths-ignore:
@@ -15,19 +16,45 @@ on:
       - 'LICENSE'
 
 # One run per ref. Pushing twice in quick succession should not leave the first
-# run burning a runner on a commit nobody will merge. Pull requests only: a push
-# to main must be allowed to finish, since the coverage job commits back.
+# run burning a runner on a commit nobody will merge. Pull requests only: every
+# merge to main gets its own verdict, even if another lands right behind it.
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
-# The coverage job rewrites the README badges and pushes back to main.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
+  # A merge to main re-ran the whole suite on a tree its PR run had already
+  # passed: 76 of 76 push runs in October 2026, 551 of the repo's ~1,500 billed
+  # minutes, with the org's included minutes about to run out (#654). This job
+  # proves through the API that the merge commit's tree is the PR head's and that
+  # the head passed; only then are app and go skipped. Anything unproven, or an
+  # API error, runs them as before. The script says why, either way.
+  tested:
+    name: already tested?
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      tested: ${{ steps.check.outputs.tested }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: scripts/ci
+      - id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/ci/push-already-tested.sh "$GITHUB_SHA"
+
   app:
     name: app (vitest)
+    needs: tested
+    # `tested` is skipped on pull requests; !cancelled() still runs this then.
+    if: ${{ !cancelled() && needs.tested.outputs.tested != 'true' }}
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -53,6 +80,11 @@ jobs:
           else
             echo "### app coverage\n_(no coverage — tests did not complete)_" >> "$GITHUB_STEP_SUMMARY"
           fi
+      # Rounded as scripts/coverage.sh rounds it for the badge.
+      - name: Coverage badge current?
+        run: |
+          pct=$(python3 -c 'import json;print(round(json.load(open("coverage/coverage-summary.json"))["total"]["lines"]["pct"]))')
+          bash ../scripts/ci/coverage-badge-check.sh "app coverage" "$pct"
 
   # ONE job for every Go module, deliberately. Each module's tests take 20-30s but
   # a job is billed ROUNDED UP to the whole minute, and each one paid another ~20s
@@ -63,12 +95,14 @@ jobs:
   # module still reports the others — the property the matrix gave for free.
   go:
     name: go
+    needs: tested
+    if: ${{ !cancelled() && needs.tested.outputs.tested != 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.22.5'
+          go-version: '1.26'
           cache-dependency-path: |
             corelib/go.sum
             worker/go.sum
@@ -90,6 +124,12 @@ jobs:
             echo "### $m coverage" >> "$GITHUB_STEP_SUMMARY"
             (cd "$m" && go tool cover -func=cover.out) \
               | awk '/^total:/{print "- total **"$3"**"}' >> "$GITHUB_STEP_SUMMARY"
+          done
+      - name: Coverage badges current?
+        run: |
+          for m in corelib worker evaluator; do
+            pct=$(cd "$m" && go tool cover -func=cover.out | awk '/^total:/{gsub("%","",$3);printf "%d",$3+0.5}')
+            bash scripts/ci/coverage-badge-check.sh "$m" "$pct"
           done
       # pbbench has no tests and no dependencies, but 480 lines that nothing
       # compiles can rot silently, and the sizing work in #331 expects to re-run
@@ -137,43 +177,7 @@ jobs:
           bash e2e/pb_version_test.sh
           bash deploy/pb_upgrade_test.sh
           bash deploy/pb_mail_test.sh
+          bash deploy/cloudflared_roll_test.sh
+          bash deploy/demo_users_test.sh
           bash deploy/ops_vendor_test.sh
-
-  # On merge to main, recompute coverage and say whether the README's static badges
-  # still match. It no longer commits them back: main only accepts changes through
-  # a PR, so the bot's direct push was rejected and turned every main run red from
-  # 2026-10-10 on (#646), and its commits were unsigned anyway. Stale badges are a
-  # warning, refreshed in an ordinary PR with `./scripts/coverage.sh --write`.
-  coverage:
-    name: check coverage badges
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [app, go]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: app/package-lock.json
-      - uses: actions/setup-go@v5
-        with:
-          go-version: '1.22.5'
-      - name: Install app deps
-        working-directory: app
-        run: npm ci
-      - name: Recompute coverage
-        run: GO=go bash scripts/coverage.sh --write
-      - name: Report coverage and stale badges
-        run: |
-          {
-            echo "### Coverage"
-            sed -n '/<!-- coverage:start -->/,/<!-- coverage:end -->/p' README.md | grep -o '!\[[^]]*\]([^)]*)' \
-              | sed -E 's/^!\[([^]]*)\].*-([0-9]+)%25-.*/- \1: \2%/'
-          } >> "$GITHUB_STEP_SUMMARY"
-          if git -c core.fileMode=false diff --quiet README.md; then
-            echo "coverage badges are current"
-          else
-            git -c core.fileMode=false diff README.md
-            echo "::warning title=Coverage badges are stale::Run ./scripts/coverage.sh --write and commit README.md in a PR."
-          fi
+          bash scripts/ci/gates_test.sh

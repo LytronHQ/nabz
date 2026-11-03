@@ -4,8 +4,15 @@ import type { Cookies } from '@sveltejs/kit';
 // Hermetic: pin the signing key so the cookie roundtrip + IP hash are deterministic.
 vi.mock('$app/env/private', () => ({ PKCE_FLOW_ENCRYPTION_KEY: 'test-secret-key' }));
 
-const { ANON_COOKIE, mintAnonToken, readAnonToken, setAnonCookie, hashIP, validateAnonTarget } =
-	await import('./anon');
+const {
+	ANON_COOKIE,
+	mintAnonToken,
+	readAnonToken,
+	setAnonCookie,
+	hashIP,
+	ipBucket,
+	validateAnonTarget
+} = await import('./anon');
 
 function mockCookies() {
 	const store = new Map<string, string>();
@@ -98,4 +105,19 @@ test('the anon cookie is not sealed with the raw app key', async () => {
 		opened = '';
 	}
 	expect(opened).not.toBe('a'.repeat(48));
+});
+
+// The per-network limit key (#671).
+describe('ipBucket', () => {
+	test('groups IPv6 by /64, in any spelling', () => {
+		const b = ipBucket('2001:db8:9:9::1');
+		expect(b).toBe('2001:0db8:0009:0009::/64');
+		expect(ipBucket('2001:DB8:9:9:ffff:1:2:3')).toBe(b);
+		expect(ipBucket('2001:db8:9:a::1')).not.toBe(b);
+	});
+	test('keeps IPv4 and IPv4-mapped IPv6 per address', () => {
+		expect(ipBucket('198.51.100.7')).toBe('198.51.100.7');
+		expect(ipBucket('::ffff:198.51.100.7')).toBe('198.51.100.7');
+		expect(ipBucket('198.51.100.8')).not.toBe(ipBucket('198.51.100.7'));
+	});
 });

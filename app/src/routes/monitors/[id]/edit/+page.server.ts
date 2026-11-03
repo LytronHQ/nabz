@@ -2,6 +2,7 @@ import { error, redirect } from '@sveltejs/kit';
 import type { PageServerLoad } from './$types';
 import { MonitorItem } from '#lib/models/monitor.js';
 import { loadMonitorFormOptions } from '#lib/server/monitor-form.js';
+import { getPlanUsage } from '#lib/server/plan.js';
 
 export const load: PageServerLoad = async ({ locals, params }) => {
 	if (!locals.user) {
@@ -17,6 +18,9 @@ export const load: PageServerLoad = async ({ locals, params }) => {
 		throw error(404, 'Monitor not found');
 	}
 
-	const options = await loadMonitorFormOptions(locals.pb!, locals.user.id);
-	return { monitor: { ...new MonitorItem(record) }, ...options };
+	const [options, plan] = await Promise.all([
+		loadMonitorFormOptions(locals.pb!, locals.user.id),
+		getPlanUsage(locals.pb!, locals.user)
+	]);
+	return { monitor: { ...new MonitorItem(record) }, ...options, plan };
 };

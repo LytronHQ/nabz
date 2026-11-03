@@ -166,7 +166,15 @@ export type MonitorStatus = (typeof MonitorStatuses)[number];
 
 const schema = z
 	.object({
-		name: z.string().min(1, 'Name is required'),
+		// No control characters (#670): the name ends up in alert email subjects
+		// and chat messages, where a line break starts a new header.
+		name: z
+			.string()
+			.min(1, 'Name is required')
+			// eslint-disable-next-line no-control-regex
+			.refine((v) => !/[\u0000-\u001f\u007f]/.test(v), {
+				message: 'Name cannot contain line breaks or control characters'
+			}),
 		type: z.enum(MonitorTypes).refine(isSupportedMonitorType, {
 			message: 'This monitor type is not available yet'
 		}),

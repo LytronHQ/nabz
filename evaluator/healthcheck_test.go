@@ -1,8 +1,12 @@
 package main
 
 import (
+	"bytes"
+	"log"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -58,4 +62,28 @@ func TestHealthPingerSurvivesAFailingEndpoint(t *testing.T) {
 	p.ping(time.Now().Add(2 * pingInterval))
 
 	newHealthPinger("http://%zz-not-a-url").ping(time.Now())
+}
+
+// #656: the ping URL's last segment is Better Stack's secret for the heartbeat;
+// anyone holding it can report the evaluator alive. A failed ping logged Go's
+// url.Error, which quotes the whole URL, so every timeout wrote the secret into
+// the container log — and from there it reached a chat transcript.
+func TestHealthPingerKeepsTheURLOutOfTheLog(t *testing.T) {
+	const secret = "s3cretHeartbeatToken"
+	var buf bytes.Buffer
+	log.SetOutput(&buf)
+	defer log.SetOutput(os.Stderr)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	srv.Close() // a refused connection, like the timeouts of 21 Oct
+	newHealthPinger(srv.URL + "/api/v1/heartbeat/" + secret).ping(time.Now())
+	newHealthPinger("http://%zz/api/v1/heartbeat/" + secret).ping(time.Now())
+
+	out := buf.String()
+	if !strings.Contains(out, "Healthcheck ping") {
+		t.Fatalf("no ping failure was logged at all: %q", out)
+	}
+	if strings.Contains(out, secret) {
+		t.Fatalf("the log carries the heartbeat secret: %q", out)
+	}
 }

@@ -3,6 +3,7 @@
 	import { resolve } from '$app/paths';
 	import { Meta, PageHeader, Pill, ProviderMark } from '#lib/components/common/index.js';
 	import { providerLabel } from '#lib/utils/oauth-providers.js';
+	import { formatInterval, listChannels } from '#lib/plans.js';
 	import type { ActionData, PageData } from './$types';
 
 	interface Props {
@@ -46,6 +47,19 @@
 					day: 'numeric'
 				})
 			: '';
+
+	// Plan and usage (#678). The meter fills to the share of the monitor limit used.
+	let plan = $derived(data.plan);
+	let monitorShare = $derived(
+		plan.monitors === null
+			? 0
+			: Math.min(100, Math.round((plan.monitors / plan.monitorLimit) * 100))
+	);
+	let channelText = $derived.by(() => {
+		if (plan.allChannels) return 'Every channel';
+		const text = listChannels(plan.channelTypes);
+		return text.charAt(0).toUpperCase() + text.slice(1);
+	});
 
 	function onAvatarChange(e: Event) {
 		const file = (e.currentTarget as HTMLInputElement).files?.[0];
@@ -130,6 +144,50 @@
 			</div>
 			<button type="submit" class="btn btn-primary">Save profile</button>
 		</form>
+	</div>
+</div>
+
+<!-- Plan (#678) -->
+<div class="card" id="plan">
+	<div class="card__h">
+		<h3>Plan</h3>
+		<span class="hint">{plan.planName}</span>
+	</div>
+	<div class="acct-body">
+		<p class="acct-current">
+			You are on the <strong>{plan.planName}</strong> plan{#if plan.reason === 'launch'}, free for
+				accounts that joined before plans existed{/if}.
+		</p>
+		<dl class="acct-plan">
+			<div class="acct-plan__row">
+				<dt>Monitors</dt>
+				<dd>
+					{#if plan.monitors === null}
+						Up to {plan.monitorLimit}
+					{:else}
+						{plan.monitors} of {plan.monitorLimit}
+					{/if}
+					<span
+						class="acct-plan__meter"
+						class:acct-plan__meter--full={plan.monitors !== null &&
+							plan.monitors >= plan.monitorLimit}
+						role="presentation"><span style="inline-size:{monitorShare}%"></span></span
+					>
+				</dd>
+			</div>
+			<div class="acct-plan__row">
+				<dt>Fastest check</dt>
+				<dd>Every {formatInterval(plan.minIntervalSeconds)}</dd>
+			</div>
+			<div class="acct-plan__row">
+				<dt>Alert channels</dt>
+				<dd>{channelText}</dd>
+			</div>
+		</dl>
+		<p class="acct-note">
+			Limits apply when you add something or make a check faster. What you already have keeps
+			running. Paid plans are not on sale yet.
+		</p>
 	</div>
 </div>
 
@@ -390,6 +448,58 @@
 		.acct-methods li > a {
 			grid-column: 2;
 			grid-row: 1 / span 2;
+		}
+	}
+	.acct-plan {
+		margin: 0;
+		width: 100%;
+		max-width: 560px;
+	}
+	.acct-plan__row {
+		display: grid;
+		grid-template-columns: 9rem 1fr;
+		gap: 12px;
+		align-items: center;
+		padding: 9px 0;
+		border-bottom: 1px solid var(--border);
+		font-size: 14px;
+	}
+	.acct-plan__row:last-child {
+		border-bottom: 0;
+	}
+	.acct-plan dt {
+		color: var(--ink-3);
+		font-size: 12.5px;
+	}
+	.acct-plan dd {
+		margin: 0;
+		color: var(--ink);
+		display: flex;
+		align-items: center;
+		gap: 12px;
+		flex-wrap: wrap;
+		font-variant-numeric: tabular-nums;
+	}
+	.acct-plan__meter {
+		display: inline-block;
+		inline-size: 120px;
+		block-size: 6px;
+		border: 1px solid var(--border);
+		border-radius: 3px;
+		overflow: hidden;
+	}
+	.acct-plan__meter > span {
+		display: block;
+		block-size: 100%;
+		background: var(--accent);
+	}
+	.acct-plan__meter--full > span {
+		background: var(--pending);
+	}
+	@media (max-width: 420px) {
+		.acct-plan__row {
+			grid-template-columns: 1fr;
+			gap: 4px;
 		}
 	}
 	.acct-remove {

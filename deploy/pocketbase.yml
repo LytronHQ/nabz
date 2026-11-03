@@ -59,7 +59,7 @@ services:
   # TWO replicas on purpose: one connector is a single point of failure for the
   # whole web app, and a crash would look like a total outage (#339).
   cloudflared:
-    image: cloudflare/cloudflared:${CLOUDFLARED_VERSION:-2026.8.2}
+    image: cloudflare/cloudflared:${CLOUDFLARED_VERSION:-2026.10.3}
     profiles: ['tunnel']
     restart: unless-stopped
     command: tunnel --no-autoupdate run

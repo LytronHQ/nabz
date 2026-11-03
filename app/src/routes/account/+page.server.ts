@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { PageServerLoad } from './$types';
 import { getActionFailure, getFormRecord } from '#lib/utils/action-utils.js';
 import { changePassword } from '#lib/server/password.js';
+import { getPlanUsage } from '#lib/server/plan.js';
 
 export type SignInMethod = { provider: string; linkId: string | null; since: string | null };
 
@@ -16,7 +17,7 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 	// which of them this user has linked. _externalAuths' built-in owner rule
 	// lets the user read their own links with their own token.
 	const userId = locals.user.id;
-	const [methods, links] = await Promise.all([
+	const [methods, links, plan] = await Promise.all([
 		locals
 			.pb!.collection('users')
 			.listAuthMethods()
@@ -27,7 +28,9 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 			.catch((err) => {
 				console.error('listing sign-in methods failed', (err as Error)?.message);
 				return null;
-			})
+			}),
+		// Plan and usage against its limits (#678).
+		getPlanUsage(locals.pb!, locals.user)
 	]);
 	const available = methods?.oauth2?.enabled ? methods.oauth2.providers.map((p) => p.name) : [];
 	const signInMethods: SignInMethod[] = available.map((provider) => {
@@ -37,6 +40,7 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 	const outcome = url.searchParams.get('connect');
 	const provider = url.searchParams.get('provider') ?? '';
 	return {
+		plan,
 		signInMethods,
 		// null when the links could not be read: the card then says so rather than
 		// showing every provider as not connected.

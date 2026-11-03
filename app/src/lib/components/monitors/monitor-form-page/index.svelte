@@ -20,6 +20,9 @@
 		submitText: string;
 		/** Where Cancel and a successful Save navigate to (list or monitor detail). */
 		backHref: string;
+		/** The plan's fastest interval in seconds, and its name, for the hint (#678). */
+		minInterval?: number;
+		planName?: string;
 	}
 
 	let {
@@ -28,7 +31,9 @@
 		availablePolicies = [],
 		title,
 		submitText,
-		backHref
+		backHref,
+		minInterval = 30,
+		planName = ''
 	}: Props = $props();
 
 	// Derived because `item` now is: /monitors/[id]/edit rebuilds it when you
@@ -86,7 +91,15 @@
 		save();
 	}}
 >
-	<Form data={form} {isNew} {availableZones} {availablePolicies} {errors} />
+	<Form
+		data={form}
+		{isNew}
+		{availableZones}
+		{availablePolicies}
+		{errors}
+		{minInterval}
+		{planName}
+	/>
 	<div class="mon-form-actions">
 		<button type="button" class="btn btn-ghost" onclick={cancel}>Cancel</button>
 		<button type="submit" class="btn btn-primary" disabled={saving}>{submitText}</button>

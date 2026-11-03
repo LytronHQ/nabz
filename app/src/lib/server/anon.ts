@@ -18,7 +18,9 @@ export const ANON_COOKIE = 'anon_session';
 export const ANON_ALLOWED_TYPE = 'website'; // website-only (also enforced in the schema)
 export const ANON_MIN_INTERVAL = 300; // 5 min — keep free-zone load + outbound volume low
 export const ANON_MAX_PER_SESSION = 1; // one strong "it works!" moment
-export const ANON_MAX_PER_IP_PER_HOUR = 5; // abuse control
+export const ANON_MAX_PER_IP_PER_HOUR = 5; // abuse control, per network (ipBucket)
+// The free zone checks every live trial, so their total is bounded too (#671).
+export const ANON_MAX_LIVE = 500;
 export const ANON_TTL_SECONDS = 60 * 60; // 1h — matches the cleanup TTL (#270)
 
 // 48 hex chars from 24 random bytes.
@@ -62,12 +64,37 @@ export function clearAnonCookie(cookies: Cookies): void {
 	cookies.delete(ANON_COOKIE, { path: '/' });
 }
 
-// HMAC the client IP so the stored value can't be reversed to an address — used
-// only for the per-IP rate limit, and deleted with the row within the hour.
+// ipBucket is what the per-network limit counts by (#671). One IPv6 subscriber
+// usually holds a whole /64, so a per-address key gave one client 2^64 budgets.
+// IPv4 and IPv4-mapped IPv6 stay per address, so IPv4 clients are never merged.
+export function ipBucket(ip: string): string {
+	const addr = (ip || '').split('%')[0].toLowerCase();
+	const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(addr);
+	if (mapped) return mapped[1];
+	if (isIP(addr) !== 6) return addr || 'unknown';
+	const groups = (s: string): string[] =>
+		(s ? s.split(':') : []).flatMap((g) => {
+			if (!g.includes('.')) return [g];
+			const p = g.split('.').map(Number);
+			return [((p[0] << 8) | p[1]).toString(16), ((p[2] << 8) | p[3]).toString(16)];
+		});
+	const dbl = addr.indexOf('::');
+	const head = groups(dbl === -1 ? addr : addr.slice(0, dbl));
+	const tail = dbl === -1 ? [] : groups(addr.slice(dbl + 2));
+	const all =
+		dbl === -1 ? head : [...head, ...Array(8 - head.length - tail.length).fill('0'), ...tail];
+	return (
+		all
+			.slice(0, 4)
+			.map((g) => g.padStart(4, '0'))
+			.join(':') + '::/64'
+	);
+}
+
+// HMAC the client network so the stored value can't be reversed to an address —
+// used only for the per-network rate limit, and deleted with the row within the hour.
 export function hashIP(ip: string): string {
-	return createHmac('sha256', secret())
-		.update(ip || 'unknown')
-		.digest('hex');
+	return createHmac('sha256', secret()).update(ipBucket(ip)).digest('hex');
 }
 
 // True when an IP LITERAL is one an untrusted target must not reach. Only applies

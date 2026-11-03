@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
 	import { refreshAll } from '$app/navigation';
+	import { resolve } from '$app/paths';
 	import { usePoll } from '#lib/utils/use-poll.js';
 	import { Meta, PageHeader, Pill, Sparkline } from '#lib/components/common/index.js';
 	import { formatDuration, formatRelativeTime } from '#lib/utils/format-utils.js';
@@ -27,7 +28,11 @@
 
 <Meta title="Usage · Admin" />
 
-<PageHeader title="Usage" sub="Product usage at a glance — is nabz being used, and growing?" />
+<PageHeader title="Usage" sub="Product usage at a glance — is nabz being used, and growing?">
+	{#snippet actions()}
+		<a class="btn btn-ghost" href={resolve('/admin/plans')}>Plans</a>
+	{/snippet}
+</PageHeader>
 
 <section class="ausec">
 	<span class="eyebrow">Users</span>

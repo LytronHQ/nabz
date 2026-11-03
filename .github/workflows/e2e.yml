@@ -12,7 +12,40 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # The nightly re-tested an unchanged main 8 times in 20 days of October 2026, 218
+  # billed minutes, five of them repeating a known failure on the same commit, with
+  # the org's included minutes about to run out (#654). The nightly now runs only
+  # on a commit e2e has not finished on in the last six days, so an unchanged main
+  # is still tested weekly. A known failure fails this gate instead, linking the
+  # run, so the nightly stays red rather than turning green by skipping. Manual
+  # runs always test.
+  gate:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      result: ${{ steps.check.outputs.result }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: scripts/ci
+      - id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/ci/e2e-already-ran.sh "$GITHUB_SHA"
+      - name: Still failing
+        if: steps.check.outputs.result == 'failure'
+        run: |
+          echo "::error title=e2e still failing::Not re-run: e2e already failed on this commit within six days (see the run linked above). Fix it in a PR, or run e2e by hand."
+          exit 1
+
   e2e:
+    needs: gate
+    # `gate` is skipped on manual runs; !cancelled() still runs this then. A
+    # failed gate (a known failure) skips it.
+    if: ${{ !cancelled() && needs.gate.result != 'failure' && needs.gate.outputs.result != 'success' }}
     runs-on: ubuntu-latest
     # The multi-worker scenarios scale the stack up and down and then wait real
     # intervals to see what the workers actually did, which is most of the run.

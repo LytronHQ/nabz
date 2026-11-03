@@ -16,9 +16,11 @@
 		data: AlertChannelNewItem | AlertChannelItem | undefined;
 		/** Per-field validation messages, keyed by field name (e.g. { url }, { botToken }). */
 		errors?: Record<string, string>;
+		/** The channel types the account's plan may add (#678); every type when unset. */
+		allowedTypes?: readonly string[];
 	}
 
-	let { data = $bindable(), errors = {} }: Props = $props();
+	let { data = $bindable(), errors = {}, allowedTypes = AlertChannelTypes }: Props = $props();
 	// The same object as `data` (edits through it reach the page's $state), typed
 	// as set: this form is only ever rendered once the page has an item.
 	let item = $derived(data as AlertChannelNewItem | AlertChannelItem);
@@ -27,10 +29,15 @@
 		pagerduty: 'PagerDuty',
 		push: 'Push notification'
 	};
-	const types: { value: AlertChannelType; name: string }[] = AlertChannelTypes.map((t) => ({
-		name: TYPE_NAMES[t] ?? t.charAt(0).toUpperCase() + t.slice(1),
-		value: t
-	}));
+	// A type the plan does not include stays listed, marked with the plan that has
+	// it, so the choice is visible; the server refuses it on save and says why
+	// (#678). The mark stays short: the select is a third of the dialog wide.
+	let types: { value: AlertChannelType; name: string }[] = $derived(
+		AlertChannelTypes.map((t) => {
+			const name = TYPE_NAMES[t] ?? t.charAt(0).toUpperCase() + t.slice(1);
+			return { name: allowedTypes.includes(t) ? name : `${name} · Pro`, value: t };
+		})
+	);
 
 	// `multiline` fields render as an auto-growing textarea so long values (webhook
 	// URLs especially) are visible in full rather than truncated in a one-line input.
@@ -234,6 +241,7 @@
 	<div class="col-span-12 sm:col-span-4">
 		<span class="form-lbl">Type</span>
 		<Select class="mt-1" label="Type" items={types} bind:value={item.type} />
+		{#if errors.type}<span class="field-err field-err--flow">{errors.type}</span>{/if}
 	</div>
 
 	<div class="col-span-12 sm:col-span-8 grid gap-4">

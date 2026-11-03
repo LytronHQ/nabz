@@ -72,6 +72,8 @@ services:
         condition: service_healthy
     environment:
       - REGION_NAME=e2e
+      # The fixture is on a private Docker address; production refuses those (#669).
+      - ALLOW_PRIVATE_TARGETS=true
       - PB_URL=http://pocketbase:8090
       - PB_AUTH_COLLECTION=service_accounts
       - PB_ADMIN_USERNAME=${E2E_WORKER_USERNAME:-worker@e2e.local}
@@ -114,7 +116,7 @@ services:
       # OFF here only: the fixture the journey tries lives on this private compose
       # network, which the SSRF guard exists to refuse. Production keeps it on
       # (remote-deploy.sh sets it for the free zone).
-      - BLOCK_PRIVATE_TARGETS=false
+      - ALLOW_PRIVATE_TARGETS=true
 
   # A second zone, off by default (`--profile zone2`). It exists so the sharding
   # spec can kill an entire zone — proving a zone reads dead only when all of its
@@ -159,6 +161,8 @@ services:
       - PB_ADMIN_PASSWORD=${E2E_EVALUATOR_PASSWORD:-evaluator-e2e-pass}
       # Fast dead-man threshold so zone-silence tests don't wait long.
       - DEADMAN_SECONDS=30
+      # Webhook and push tests deliver to the fixture, a private Docker address (#669).
+      - ALLOW_PRIVATE_TARGETS=true
       - HEALTH_ADDR=off
       # Minted by setup.sh (#602); the push channel test posts to the fixture.
       - VAPID_PUBLIC_KEY=${E2E_VAPID_PUBLIC_KEY:-}

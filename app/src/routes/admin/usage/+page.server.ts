@@ -1,7 +1,7 @@
 import { error } from '@sveltejs/kit';
 import type { PageServerLoad } from './$types';
 import { ADMIN_EMAILS, HEALTH_STALE_SECONDS, WEB_BEAT_STALE_SECONDS } from '$app/env/private';
-import { isAdmin } from '#lib/server/admin.js';
+import { isAdminUser } from '#lib/server/admin.js';
 import { serviceClient } from '#lib/server/service-pb.js';
 import { getUsageStats, getFleetOps } from '#lib/server/admin-usage.js';
 import { staleLimits } from '#lib/server/health.js';
@@ -9,7 +9,7 @@ import { staleLimits } from '#lib/server/health.js';
 export const load: PageServerLoad = async ({ locals }) => {
 	// Server-side gate: logged-out OR non-admin → 404 (not 403), so the route
 	// isn't even discoverable. A hidden nav link is not the gate.
-	if (!locals.user || !isAdmin(locals.user.email, ADMIN_EMAILS)) {
+	if (!isAdminUser(locals.user, ADMIN_EMAILS)) {
 		throw error(404, 'Not found');
 	}
 

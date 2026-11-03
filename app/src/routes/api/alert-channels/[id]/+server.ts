@@ -6,6 +6,8 @@ import {
 } from '#lib/models/alert-channel.js';
 import { failIfNoId, failIfNoResponse, failIfNoUser } from '#lib/utils/api-utils.js';
 import { getApiErrors } from '#lib/utils/action-utils.js';
+import { getAccountPlan, planRefusal } from '#lib/server/plan.js';
+import { channelTypeAllowed, channelTypeMessage } from '#lib/plans.js';
 
 export const PATCH: RequestHandler = async ({ locals, request, params: { id } }) => {
 	failIfNoUser(locals);
@@ -16,6 +18,16 @@ export const PATCH: RequestHandler = async ({ locals, request, params: { id } })
 		const validation = new AlertChannelItemValidator(data);
 		if (!validation.isValid) {
 			return validation.getInvalidDataResponse();
+		}
+
+		// A channel keeps the type it has (#678); switching it to a type the plan
+		// does not include counts as adding one.
+		const [{ plan }, current] = await Promise.all([
+			getAccountPlan(locals.pb!, locals.user!),
+			locals.pb!.collection('alert_channels').getOne(id, { fields: 'id,type' })
+		]);
+		if (!channelTypeAllowed(plan, data.type, String(current.type))) {
+			return planRefusal(channelTypeMessage(plan, data.type), 'type');
 		}
 
 		const response = await locals.pb?.collection('alert_channels').update(id, {

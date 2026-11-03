@@ -75,6 +75,14 @@
 			<Icon name="escalations" />
 			Escalations
 		</a>
+		<a
+			href={resolve('status-pages')}
+			class:active={isActive(path, '/status-pages')}
+			aria-current={isActive(path, '/status-pages') ? 'page' : undefined}
+		>
+			<Icon name="status" />
+			Status pages
+		</a>
 		{#if isAdmin}
 			<a
 				href={resolve('admin/usage')}

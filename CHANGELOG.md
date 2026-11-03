@@ -2,6 +2,20 @@
 
 Notable changes to nabz. Newest first.
 
+## v0.13.0
+
+_2026-11-03_
+
+- **Free and Pro plans** — every account now has a plan, shown with its usage on your account page. Free has 10 monitors checked every 5 minutes at the fastest, email, push and webhook alerts, and one status page. Pro has 100 monitors checked as often as every 30 seconds, every alert channel, and 10 status pages. **Every account that existed before today is on Pro, at no charge.** A limit only ever refuses something *new*: what you already have keeps running, and stays editable, whatever the plan.
+- **Pricing page** — Pro will cost $9 a month or $90 a year, tax included. It is not on sale yet: nothing is charged, and the page says so rather than offering a button that leads nowhere. The terms now say what a lapsed plan does (nothing you have is deleted, hidden or paused), the privacy policy names Stripe for when Pro goes on sale, and there is a refund policy.
+- **Public status pages** — share a page at nabz.sh/s/your-name with the state, 30-day uptime and incident times of the monitors you choose. Visitors see each monitor's name, never its address or error details. Manage them under Status pages in the menu.
+- **Free check tools** — nabz.sh/tools checks a website, an SSL certificate, a port, DNS records or a ping from probes in several countries, without an account. Each result has a link to keep watching the same thing with a monitor.
+- **Checks and alerts no longer reach private addresses** — a monitor or a webhook pointed at a private, loopback or link-local address is refused, so nabz cannot be used to probe networks it should not see.
+- **One slow alert channel can no longer hold up everyone's alerts** — every alert delivery now has a fixed time and size limit.
+- **The anonymous trial is harder to abuse**, and the admin pages accept only verified admin addresses.
+- **Security updates** for the checking nodes (Go 1.26 with current crypto and networking libraries).
+- The demo accounts no longer exist outside the development fleet.
+
 ## v0.12.0
 
 _2026-10-20_

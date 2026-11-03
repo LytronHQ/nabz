@@ -37,6 +37,14 @@ func DoRequest(method, url string, body []byte, token string) (HTTPResult, error
 // Header VALUES are never logged. A failed request logs the method and URL only,
 // which is why the retry logging below stayed as it was.
 func DoRequestWithHeaders(method, url string, body []byte, token string, headers map[string]string) (HTTPResult, error) {
+	return DoRequestWithClient(httpClient, method, url, body, token, headers)
+}
+
+// DoRequestWithClient is DoRequestWithHeaders through a caller's client. The
+// evaluator sends to user-chosen addresses through a client that refuses private
+// destinations (#669); this shared client must keep reaching PocketBase on the
+// private network, so the guard cannot live here.
+func DoRequestWithClient(client *http.Client, method, url string, body []byte, token string, headers map[string]string) (HTTPResult, error) {
 	var lastErr error
 
 	for attempt := 0; attempt < httpMaxAttempts; attempt++ {
@@ -64,7 +72,7 @@ func DoRequestWithHeaders(method, url string, body []byte, token string, headers
 			}
 		}
 
-		res, err := httpClient.Do(req)
+		res, err := client.Do(req)
 		if err != nil {
 			lastErr = err
 			log.Printf("http %s %s failed (attempt %d/%d): %s", method, url, attempt+1, httpMaxAttempts, err)

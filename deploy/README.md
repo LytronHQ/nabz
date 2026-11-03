@@ -144,14 +144,14 @@ docker compose --env-file /etc/monitors/worker.env -f /opt/monitors/deploy/worke
 The "try it without signing up" feature runs anonymous monitors in a **dedicated, isolated zone** so untrusted, unauthenticated traffic never touches the real `eu`/`us` workers. It's an ordinary worker node with one reserved zone name — **`free`** — which flips the worker into anon mode:
 
 - it runs the **`anon_monitors`** collection instead of `monitors` (its own in-process schedule),
-- it enforces the **SSRF guard** (`BLOCK_PRIVATE_TARGETS=true`, set automatically for `free`), since it checks arbitrary user URLs,
+- it refuses private destinations, like every zone does since #669 (opt out only with `ALLOW_PRIVATE_TARGETS=true`, never on a public zone),
 - it reaps anon monitors past the **1-hour TTL**,
 - and it publishes **no** `zone_stats`, so it stays out of the public `/api/health`.
 
 **Provision it** exactly like any worker node — one small VPS, SSH key at creation, no inbound ports but SSH:
 
-- **Laptop deploy:** add one line to `NODES` — `worker <free-vps-ip> free` — and re-run `./deploy/remote-deploy.sh <env>`, which sets `REGION_NAME=free` + `BLOCK_PRIVATE_TARGETS=true` on that host and composes it up.
-- **On-box:** `REGION_NAME=free curl -fsSL …/setup-worker.sh | sudo bash`, and set `BLOCK_PRIVATE_TARGETS=true` in `/etc/monitors/worker.env`.
+- **Laptop deploy:** add one line to `NODES` — `worker <free-vps-ip> free` — and re-run `./deploy/remote-deploy.sh <env>`, which sets `REGION_NAME=free` on that host and composes it up.
+- **On-box:** `REGION_NAME=free curl -fsSL …/setup-worker.sh | sudo bash`. Nothing else to set: the guard is on by default.
 
 Uses the **same** `role=worker` service account as the other zones (the `anon_monitors` rules allow any service account). `free` is a **reserved** zone name — don't assign real monitors to it.
 

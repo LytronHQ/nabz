@@ -2,6 +2,8 @@ import type { RequestHandler } from '@sveltejs/kit';
 import { MonitorItem, MonitorItemValidator, toMonitorConfig } from '#lib/models/monitor.js';
 import { failIfNoId, failIfNoResponse, failIfNoUser } from '#lib/utils/api-utils.js';
 import { getApiErrors } from '#lib/utils/action-utils.js';
+import { getAccountPlan, planRefusal } from '#lib/server/plan.js';
+import { intervalAllowed, intervalMessage } from '#lib/plans.js';
 
 export const GET: RequestHandler = async ({ locals, params: { id } }) => {
 	failIfNoUser(locals);
@@ -29,6 +31,16 @@ export const PATCH: RequestHandler = async ({ locals, request, params: { id } })
 		const dataValidation = new MonitorItemValidator(data);
 		if (!dataValidation.isValid) {
 			return dataValidation.getInvalidDataResponse();
+		}
+
+		// Making a monitor check faster than the plan allows is refused (#678); an
+		// interval it already had is kept, so older monitors stay editable.
+		const [{ plan }, current] = await Promise.all([
+			getAccountPlan(locals.pb!, locals.user!),
+			locals.pb!.collection('monitors').getOne(id, { fields: 'id,interval' })
+		]);
+		if (!intervalAllowed(plan, data.interval, Number(current.interval))) {
+			return planRefusal(intervalMessage(plan), 'interval');
 		}
 
 		// Only the user-editable fields are written here; status / last_checked

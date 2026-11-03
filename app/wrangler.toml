@@ -92,3 +92,17 @@ crons = ["*/2 * * * *"]
 
 [env.staging.triggers]
 crons = ["*/2 * * * *"]
+
+# Workers Logs. From 22 Oct 2026 the liveness beat went missing for 5-21 minutes
+# at a time, holding heartbeat incidents, and nothing could say whether the cron
+# had not fired or the beat had failed: the wrapper's `liveness beat failed`
+# line went nowhere (#656). Every invocation, the cron's included, is kept now.
+# A few thousand events a day, far inside the plan's allowance. Environments do
+# not inherit it, hence the staging copy.
+[observability]
+enabled = true
+head_sampling_rate = 1
+
+[env.staging.observability]
+enabled = true
+head_sampling_rate = 1

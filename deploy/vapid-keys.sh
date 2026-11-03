@@ -21,7 +21,11 @@ b64url() { openssl base64 -A | tr '+/' '-_' | tr -d '='; }
 openssl ecparam -name prime256v1 -genkey -noout -out "$tmp/key.pem" 2>/dev/null
 # The DER private key is a fixed SEC1 layout for P-256: the 32-byte scalar
 # starts at offset 7; the SPKI public key ends with the 65-byte point.
-openssl ec -in "$tmp/key.pem" -outform DER 2>/dev/null | tail -c +8 | head -c 32 > "$tmp/priv"
+# Cut from a file, not a pipe: under pipefail, `tail | head -c 32` fails at
+# random when head exits before tail has written everything (SIGPIPE), which
+# failed CI on PR #668.
+openssl ec -in "$tmp/key.pem" -outform DER -out "$tmp/key.der" 2>/dev/null
+dd if="$tmp/key.der" of="$tmp/priv" bs=1 skip=7 count=32 status=none
 openssl ec -in "$tmp/key.pem" -pubout -outform DER 2>/dev/null | tail -c 65 > "$tmp/pub"
 
 [ "$(wc -c < "$tmp/priv")" -eq 32 ] || { echo "vapid-keys: private key is not 32 bytes" >&2; exit 1; }

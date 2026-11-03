@@ -50,9 +50,8 @@ x-worker: &worker
 
 x-env: &env
   REGION_NAME: ${REGION_NAME}
-  # SSRF guard (#268): true restricts checks to public IPs (the anonymous
-  # "free" zone sets this; the normal eu/us zones leave it off/blank).
-  BLOCK_PRIVATE_TARGETS: ${BLOCK_PRIVATE_TARGETS:-}
+  # Private-destination guard (#669): on unless this is "true" (dev fleet only).
+  ALLOW_PRIVATE_TARGETS: ${ALLOW_PRIVATE_TARGETS:-}
   PB_URL: ${PB_URL}
   PB_AUTH_COLLECTION: ${PB_AUTH_COLLECTION:-}
   PB_ADMIN_USERNAME: ${PB_ADMIN_USERNAME}

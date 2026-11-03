@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log"
 	"net/http"
+	"net/url"
 	"time"
 
 	"monitors/corelib/utils"
@@ -60,14 +62,17 @@ func (p *healthPinger) ping(now time.Time) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), pingTimeout)
 	defer cancel()
+	// Never log the URL: its last segment is Better Stack's secret for this
+	// heartbeat, and Go's url.Error quotes the whole URL. Every timeout put it in
+	// the container log (#656).
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.url, nil)
 	if err != nil {
-		log.Printf("Healthcheck ping: bad URL %q: %s", p.url, err)
+		log.Printf("Healthcheck ping: HEALTHCHECK_PING_URL does not parse: %s", withoutURL(err))
 		return
 	}
 	res, err := p.client.Do(req)
 	if err != nil {
-		log.Printf("Healthcheck ping: failed: %s", err)
+		log.Printf("Healthcheck ping: failed: %s", withoutURL(err))
 		return
 	}
 	defer res.Body.Close()
@@ -78,3 +83,14 @@ func (p *healthPinger) ping(now time.Time) {
 
 // healthPingURL reads the configured endpoint. Unset = feature off.
 func healthPingURL() string { return utils.GetEnv("HEALTHCHECK_PING_URL", "") }
+
+// withoutURL drops the URL that net/url and net/http put in their errors, keeping
+// the cause ("context deadline exceeded", "connection refused", "invalid URL
+// escape").
+func withoutURL(err error) error {
+	var ue *url.Error
+	if errors.As(err, &ue) {
+		return ue.Err
+	}
+	return err
+}

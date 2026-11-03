@@ -1,10 +1,10 @@
 module monitors/corelib
 
-go 1.22.5
+go 1.26.0
 
 require (
 	github.com/joho/godotenv v1.5.1
-	golang.org/x/net v0.24.0
+	golang.org/x/net v0.62.0
 	gopkg.in/yaml.v2 v2.4.0
 )
 

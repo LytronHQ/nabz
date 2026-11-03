@@ -129,7 +129,7 @@
 		</div>
 
 		<!-- locked previews: shown in full but gated behind sign-up -->
-		<p class="locked-lead">Sign up to unlock the rest — free during beta:</p>
+		<p class="locked-lead">Sign up free to unlock the rest:</p>
 		<div class="locked-grid">
 			{#each locked as w, i (i)}
 				<div class="card locked">

@@ -12,6 +12,8 @@ import { DefaultPageSize } from '#lib/constants.js';
 import { getApiErrors } from '#lib/utils/action-utils.js';
 import { computeUptime24h } from '#lib/server/checks.js';
 import { getLastDowntime } from '#lib/server/incidents.js';
+import { countMonitors, getAccountPlan, planRefusal } from '#lib/server/plan.js';
+import { intervalAllowed, intervalMessage, monitorLimitMessage } from '#lib/plans.js';
 
 export const GET: RequestHandler = async ({ locals, url }) => {
 	failIfNoUser(locals);
@@ -80,7 +82,18 @@ export const POST: RequestHandler = async ({ locals, request }) => {
 		return dataValidation.getInvalidDataResponse();
 	}
 
+	// Plan limits (#678), checked only here, when something is added.
+	const userId = locals.user!.id;
+	const { plan } = await getAccountPlan(locals.pb!, locals.user!);
+	if (!intervalAllowed(plan, data.interval)) {
+		return planRefusal(intervalMessage(plan), 'interval');
+	}
+
 	try {
+		if ((await countMonitors(locals.pb!, userId)) >= plan.monitors) {
+			return planRefusal(monitorLimitMessage(plan));
+		}
+
 		// Heartbeat monitors are reached by the job checking in to /ping/{token},
 		// so they carry an unguessable token instead of a probe target.
 		const token = data.type === 'heartbeat' ? randomBytes(24).toString('base64url') : '';
@@ -100,6 +113,14 @@ export const POST: RequestHandler = async ({ locals, request }) => {
 		});
 
 		const item = failIfNoResponse(response);
+
+		// Count again now that the row exists and give it back if the account is
+		// over its plan: parallel requests all passed the count above, and counting
+		// after the insert can only err towards refusing (same reasoning as #671).
+		if ((await countMonitors(locals.pb!, userId)) > plan.monitors) {
+			await locals.pb!.collection('monitors').delete(item.id);
+			return planRefusal(monitorLimitMessage(plan));
+		}
 
 		return Response.json(new MonitorItem(item), { status: 201 });
 	} catch (err) {

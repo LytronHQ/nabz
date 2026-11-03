@@ -3,14 +3,17 @@
 	import { resolve } from '$app/paths';
 
 	import { goto } from '$app/navigation';
+	import { page } from '$app/state';
 	import { Meta, Pill, ThemeToggle } from '#lib/components/common/index.js';
+	import PricingTable from '#lib/components/pricing/pricing-table.svelte';
 
 	let { data } = $props();
 	const year = new Date().getFullYear();
 
 	// First-touch "try it" (#271): create one monitor without signing up, then land
 	// on its (gated) detail page. The anon endpoint sets the session cookie + limits.
-	let tryUrl = $state('');
+	// A free tool's "watch this" link (#684) arrives as /?url=…#try, filled in here.
+	let tryUrl = $state(page.url.searchParams.get('url') ?? '');
 	let busy = $state(false);
 	let tryError = $state('');
 	async function tryIt() {
@@ -60,6 +63,8 @@
 			</a>
 			<nav class="lp-nav-links">
 				<a href="#how">How it works</a>
+				<a href={resolve('/tools')}>Free tools</a>
+				<a href={resolve('/pricing')}>Pricing</a>
 				<a href={resolve('signin')}>Sign in</a>
 				<a class="btn btn-primary" href={resolve('signup')}>Get started</a>
 				<ThemeToggle />
@@ -78,6 +83,7 @@
 					things.
 				</p>
 				<form
+					id="try"
 					class="lp-try"
 					onsubmit={(e) => {
 						e.preventDefault();
@@ -102,7 +108,7 @@
 					<span class="dot"></span>
 					No signup — watch it work, then
 					<a href={resolve('signup')}>create an account</a>
-					to keep it. Free during beta.
+					to keep it on the Free plan.
 				</p>
 			</div>
 
@@ -235,6 +241,23 @@
 			</div>
 		</section>
 
+		<!-- status pages (#679) -->
+		<section class="lp-section">
+			<span class="eyebrow">Status pages</span>
+			<h2>Tell your users, too.</h2>
+			<p class="lp-section-lead">
+				Share a page at <b>nabz.sh/s/your-name</b> with the state, 30-day uptime and incident times of
+				the monitors you choose, and nothing else: no addresses, no error details.
+			</p>
+		</section>
+
+		<!-- pricing (#682) -->
+		<section class="lp-section" id="pricing">
+			<span class="eyebrow">Pricing</span>
+			<h2>Free to start. Pro when you need it.</h2>
+			<PricingTable />
+		</section>
+
 		<!-- how it works -->
 		<section class="lp-section" id="how">
 			<span class="eyebrow">How it works</span>
@@ -287,11 +310,6 @@
 			<div class="lp-grid lp-soon">
 				<div class="lp-feature">
 					<span class="lp-tag mono">soon</span>
-					<h3>Public status pages</h3>
-					<p>Shareable uptime & incident history for a chosen set of monitors.</p>
-				</div>
-				<div class="lp-feature">
-					<span class="lp-tag mono">soon</span>
 					<h3>Public API & tokens</h3>
 					<p>
 						Manage monitors and pull status programmatically — for the people who automate
@@ -314,7 +332,7 @@
 
 				<a class="btn btn-ghost btn-lg" href={resolve('signin')}>Sign in</a>
 			</div>
-			<p class="lp-beta"><span class="dot"></span>Free during beta.</p>
+			<p class="lp-beta"><span class="dot"></span>Free plan, no card needed.</p>
 		</section>
 
 		<footer class="lp-footer">
@@ -331,11 +349,15 @@
 				</span>
 				<b>nabz</b>
 			</div>
-			<span class="lp-muted">© {year} nabz · Free during beta · {VERSION_LABEL}</span>
+			<span class="lp-muted">© {year} nabz · {VERSION_LABEL}</span>
 			<div class="lp-footer-links">
+				<a href={resolve('/tools')}>Free tools</a>
+				<a href={resolve('/pricing')}>Pricing</a>
 				{#if data?.changelogVisible}
 					<a href={resolve('changelog')}>Changelog</a>
 				{/if}
+				<a href={resolve('/terms')}>Terms</a>
+				<a href={resolve('/privacy')}>Privacy</a>
 
 				<a href={resolve('signin')}>Sign in</a>
 			</div>
