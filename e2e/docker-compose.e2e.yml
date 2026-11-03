@@ -197,6 +197,8 @@ services:
       # Seeded by setup.sh; the shared dashboard user is deliberately not an admin.
       - ADMIN_EMAILS=${E2E_ADMIN_EMAIL:-staff@e2e.local}
       - VAPID_PUBLIC_KEY=${E2E_VAPID_PUBLIC_KEY:-}
+      # The hosted Free/Pro limits (#694); unset, every account is unlimited.
+      - HOSTED_PLANS=true
     ports:
       - '${E2E_WEB_PORT:-4390}:3000'
 

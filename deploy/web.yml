@@ -41,6 +41,9 @@ services:
       # Web Push (#602): the public key devices subscribe with. Empty = the
       # channel form says push is not set up.
       - VAPID_PUBLIC_KEY=${VAPID_PUBLIC_KEY:-}
+      # nabz.sh's Free/Pro limits (#694); unset on a self-hosted fleet, which then
+      # has no limits. remote-deploy.sh writes it from the env file.
+      - HOSTED_PLANS=${HOSTED_PLANS:-}
       # Leave NODE_ENV unset over plain http (secure cookies would break login);
       # set NODE_ENV=production once the app is behind TLS.
       - NODE_ENV=${NODE_ENV:-}

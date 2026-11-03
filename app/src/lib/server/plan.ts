@@ -1,5 +1,13 @@
 import type PocketBase from 'pocketbase';
-import { resolvePlan, type Plan, type PlanReason, type SubscriptionLike } from '#lib/plans.js';
+import { HOSTED_PLANS } from '$app/env/private';
+import {
+	SELF_HOSTED,
+	monitorLimitMessage,
+	resolvePlan,
+	type Plan,
+	type PlanReason,
+	type SubscriptionLike
+} from '#lib/plans.js';
 import { AlertChannelTypes } from '#lib/models/alert-channel.js';
 
 export type AccountPlan = { plan: Plan; reason: PlanReason };
@@ -15,6 +23,10 @@ export async function getAccountPlan(
 	pb: PocketBase,
 	user: { id: string; created?: string | null }
 ): Promise<AccountPlan> {
+	// Plans exist only on nabz's hosted service (#694). Without HOSTED_PLANS this is
+	// someone's own install, and its accounts have no limits at all. v0.13.0 shipped
+	// without this check, and self-hosted accounts got the Free limits.
+	if (!hostedPlans()) return { plan: SELF_HOSTED, reason: 'self-hosted' };
 	let sub: SubscriptionLike | null = null;
 	try {
 		const res = await pb.collection('subscriptions').getList(1, 1, {
@@ -25,6 +37,11 @@ export async function getAccountPlan(
 		console.error('plan: reading the subscription failed', (err as Error)?.message);
 	}
 	return resolvePlan(sub, user.created);
+}
+
+/** True on nabz's own hosted environments, which set HOSTED_PLANS=true. */
+export function hostedPlans(): boolean {
+	return String(HOSTED_PLANS ?? '').toLowerCase() === 'true';
 }
 
 /** How many monitors the account has. */
@@ -58,6 +75,10 @@ export type PlanUsage = {
 	minIntervalSeconds: number;
 	channelTypes: string[];
 	allChannels: boolean;
+	/** False on a self-hosted install, where nothing is limited (#694). */
+	limited: boolean;
+	/** What the new-monitor page says when the account is full. */
+	monitorLimitMessage: string;
 };
 
 /**
@@ -78,6 +99,8 @@ export async function getPlanUsage(
 		monitorLimit: plan.monitors,
 		minIntervalSeconds: plan.minIntervalSeconds,
 		channelTypes: [...plan.channelTypes],
-		allChannels: plan.channelTypes.length === AlertChannelTypes.length
+		allChannels: plan.channelTypes.length === AlertChannelTypes.length,
+		limited: reason !== 'self-hosted',
+		monitorLimitMessage: monitorLimitMessage(plan)
 	};
 }

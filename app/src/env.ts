@@ -19,5 +19,8 @@ export const variables = defineEnvVars({
 	CF_ACCESS_CLIENT_SECRET: { schema: (input) => input ?? '' },
 	// The public half of the Web Push key pair (#602). Public by nature: browsers
 	// need it to subscribe. The private half lives only with the evaluator.
-	VAPID_PUBLIC_KEY: { schema: (input) => input ?? '' }
+	VAPID_PUBLIC_KEY: { schema: (input) => input ?? '' },
+	// "true" on nabz's own hosted environments only (#694): it turns on the Free and
+	// Pro limits. Unset, as on any self-hosted install, every account is unlimited.
+	HOSTED_PLANS: { schema: (input) => input ?? '' }
 });

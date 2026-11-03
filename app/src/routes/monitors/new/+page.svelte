@@ -4,7 +4,6 @@
 	import { MonitorFormPage } from '#lib/components/monitors/index.js';
 	import { page } from '$app/state';
 	import { MonitorNewItem, isSupportedMonitorType, type MonitorType } from '#lib/models/monitor.js';
-	import { monitorLimitMessage, PLANS } from '#lib/plans.js';
 
 	let { data } = $props();
 	const item = new MonitorNewItem();
@@ -27,7 +26,7 @@
 {#if atLimit}
 	<div class="plan-full">
 		<Alert tone="info">
-			{monitorLimitMessage(PLANS[data.plan.planId])}
+			{data.plan.monitorLimitMessage}
 			<a class="plan-full__link" href={resolve('/account')}>See your plan</a>
 		</Alert>
 	</div>

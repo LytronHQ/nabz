@@ -11,7 +11,7 @@ import { AlertChannelTypes } from '#lib/models/alert-channel.js';
 export type PlanId = 'free' | 'pro';
 
 export interface Plan {
-	id: PlanId;
+	id: PlanId | 'self-hosted';
 	name: string;
 	/** How many monitors an account may have. */
 	monitors: number;
@@ -62,6 +62,24 @@ export const PLANS: Record<PlanId, Plan> = {
 };
 
 /**
+ * Every account on a self-hosted install (#694). Plans are for nabz's own hosted
+ * service: someone running the open-source code on their own servers gets
+ * everything, with no limit and no "Powered by nabz" footer.
+ */
+export const SELF_HOSTED: Plan = {
+	id: 'self-hosted',
+	name: 'Self-hosted',
+	monitors: Number.POSITIVE_INFINITY,
+	minIntervalSeconds: 30,
+	channelTypes: AlertChannelTypes,
+	statusPages: Number.POSITIVE_INFINITY,
+	statusPageFooter: false,
+	priceMonthlyUsd: 0,
+	priceYearlyUsd: 0,
+	retentionDays: Number.POSITIVE_INFINITY
+};
+
+/**
  * Accounts created before plans reached production get Pro (owner decision,
  * epic #677). An account created after it starts on Free.
  */
@@ -85,7 +103,7 @@ export interface SubscriptionLike {
 	current_period_end?: string | null;
 }
 
-export type PlanReason = 'subscription' | 'launch' | 'default';
+export type PlanReason = 'subscription' | 'launch' | 'default' | 'self-hosted';
 
 /** PocketBase writes dates as "2026-11-03 07:50:00.000Z"; Date wants the T. */
 function parseTime(v: string | null | undefined): number | null {

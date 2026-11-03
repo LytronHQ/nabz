@@ -94,7 +94,8 @@ export async function listPlanRows(pb: PocketBase): Promise<PlanRow[]> {
 	return rows.map((r) => ({
 		userId: r.user as string,
 		email: emails.get(r.user as string) ?? '',
-		plan: resolvePlan(r as unknown as SubscriptionLike, null).plan.id,
+		// A subscriptions row resolves to free or pro, never self-hosted.
+		plan: resolvePlan(r as unknown as SubscriptionLike, null).plan.id as PlanId,
 		source: r.source as string,
 		note: (r.note as string) ?? '',
 		updated: r.updated as string

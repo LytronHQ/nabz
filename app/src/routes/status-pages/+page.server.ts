@@ -29,7 +29,9 @@ export const load: PageServerLoad = async ({ locals }) => {
 			count: ((p.monitors as string[]) ?? []).length
 		})),
 		monitors: monitors.map((m) => ({ id: m.id, name: m.name as string })),
+		// Infinity on a self-hosted install (#694); the page then shows no limit.
 		limit: plan.statusPages,
+		limited: Number.isFinite(plan.statusPages),
 		planName: plan.name,
 		footer: plan.statusPageFooter,
 		// The same words the refusal uses, from plans.ts.
