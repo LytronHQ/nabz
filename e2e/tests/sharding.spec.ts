@@ -47,7 +47,10 @@ function scaleWorkers(n: number) {
 
 /** Container ids of the running replicas of a service. */
 function containers(service: string): string[] {
-	return compose('ps', '-q', service).split('\n').map((s) => s.trim()).filter(Boolean);
+	return compose('ps', '-q', service)
+		.split('\n')
+		.map((s) => s.trim())
+		.filter(Boolean);
 }
 
 /** Take one container away and keep it away.
@@ -99,7 +102,12 @@ async function records(api: APIRequestContext, token: string, collection: string
 }
 
 /** Workers PocketBase currently believes are alive in a zone. */
-async function liveWorkers(api: APIRequestContext, token: string, zone: string, ttlMs = ROSTER_TTL_MS * 3) {
+async function liveWorkers(
+	api: APIRequestContext,
+	token: string,
+	zone: string,
+	ttlMs = ROSTER_TTL_MS * 3
+) {
 	const rows = await records(
 		api,
 		token,
@@ -137,7 +145,12 @@ async function createMonitor(
 	return (await res.json()).id as string;
 }
 
-async function checkTimes(api: APIRequestContext, token: string, monitorId: string, sinceMs: number) {
+async function checkTimes(
+	api: APIRequestContext,
+	token: string,
+	monitorId: string,
+	sinceMs: number
+) {
 	const rows = await records(
 		api,
 		token,
@@ -333,12 +346,16 @@ test.describe('multi-worker zones', () => {
 
 		for (const id of ids) {
 			const times = await checkTimes(request, su, id, from);
-			expect(times.length, `monitor ${id} stopped being checked after the rebalance`).toBeGreaterThanOrEqual(1);
+			expect(
+				times.length,
+				`monitor ${id} stopped being checked after the rebalance`
+			).toBeGreaterThanOrEqual(1);
 			for (let i = 1; i < times.length; i++) {
 				const gap = times[i] - times[i - 1];
-				expect(gap, `monitor ${id} still double-checked ${gap}ms apart after rebalancing`).toBeGreaterThan(
-					(INTERVAL * 1000) / 2
-				);
+				expect(
+					gap,
+					`monitor ${id} still double-checked ${gap}ms apart after rebalancing`
+				).toBeGreaterThan((INTERVAL * 1000) / 2);
 			}
 		}
 	});
@@ -433,5 +450,27 @@ test.describe('multi-worker zones', () => {
 				message: 'zone A stopped beating when zone B died'
 			})
 			.toBeGreaterThan(Number(beforeKill));
+	});
+
+	// #708: rescaling runs `docker compose up` from this process, and compose
+	// recreates any service whose environment differs. Without the VAPID keys in
+	// Playwright's environment, the evaluator came back with none and every later
+	// push delivery was skipped ("VAPID keys not configured").
+	test("rescaling keeps the evaluator's push keys", () => {
+		scaleWorkers(1);
+		const [id] = containers('evaluator');
+		expect(id, 'a running evaluator').toBeTruthy();
+		const env = execFileSync('docker', ['inspect', id, '--format', '{{json .Config.Env}}'], {
+			encoding: 'utf8'
+		});
+		const vars = Object.fromEntries(
+			(JSON.parse(env) as string[]).map((kv) => [
+				kv.slice(0, kv.indexOf('=')),
+				kv.slice(kv.indexOf('=') + 1)
+			])
+		);
+		expect(vars.VAPID_PUBLIC_KEY, 'VAPID_PUBLIC_KEY').not.toBe('');
+		expect(vars.VAPID_PRIVATE_KEY, 'VAPID_PRIVATE_KEY').not.toBe('');
+		expect(vars.VAPID_PRIVATE_KEY).toBeDefined();
 	});
 });

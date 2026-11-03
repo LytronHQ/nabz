@@ -2,6 +2,12 @@
 
 Notable changes to nabz. Newest first.
 
+## v0.13.5
+
+_2026-11-03_
+
+- **Status page names are checked** — a page's title and address can no longer use nabz's own name, the name of a well-known company or bank, or offensive words, so nobody can publish a page that passes for nabz's or fakes another company's outage. Ordinary names that only contain such letters, like Scunthorpe or Pineapple, still work. Pages already published keep working.
+
 ## v0.13.4
 
 _2026-11-03_
