@@ -4,7 +4,11 @@ import {
 	PLANS,
 	PRO_FOR_ACCOUNTS_CREATED_BEFORE,
 	channelTypeAllowed,
+	SELF_HOSTED,
+	formatHistory,
 	formatInterval,
+	historyMessage,
+	historyStart,
 	intervalAllowed,
 	intervalMessage,
 	listChannels,
@@ -85,5 +89,22 @@ describe('wording reads from the plan numbers', () => {
 	it('messages carry the numbers from PLANS', () => {
 		expect(monitorLimitMessage(PLANS.free)).toContain(`${PLANS.free.monitors} monitors`);
 		expect(intervalMessage(PLANS.free)).toContain(`${PLANS.free.minIntervalSeconds} seconds`);
+	});
+});
+
+// #703: how far back each plan shows history.
+describe('history window', () => {
+	it('Free starts 29 days before today, so "30 days" includes today', () => {
+		expect(historyStart(PLANS.free, NOW)!.toISOString()).toBe('2030-05-03T00:00:00.000Z');
+		expect(historyStart(PLANS.pro, NOW)!.toISOString()).toBe('2029-06-02T00:00:00.000Z');
+		expect(historyStart(SELF_HOSTED, NOW)).toBeNull();
+	});
+
+	it('names the span in words', () => {
+		expect(formatHistory(30)).toBe('30 days');
+		expect(formatHistory(365)).toBe('1 year');
+		expect(historyMessage(PLANS.free)).toBe(
+			'The Free plan shows the last 30 days of history. Older history is kept, and Pro shows 1 year of it.'
+		);
 	});
 });

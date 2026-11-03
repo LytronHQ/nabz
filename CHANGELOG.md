@@ -2,6 +2,12 @@
 
 Notable changes to nabz. Newest first.
 
+## v0.13.4
+
+_2026-11-03_
+
+- **How far back history goes depends on the plan** — Free shows the last 30 days of uptime and incident history, Pro a year. Nothing is deleted: all of it is kept, and moving to Pro shows the older history again. The pricing page, the Plan card on your account, the terms and the refund policy say so.
+
 ## v0.13.3
 
 _2026-11-03_

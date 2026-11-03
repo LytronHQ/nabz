@@ -144,24 +144,28 @@ function availabilityFor(
 export async function getAvailabilityTable(
 	pb: PocketBase,
 	monitorId: string,
-	now: Date = new Date()
+	now: Date = new Date(),
+	/** How far back the account's plan shows (#703); a longer window is left out. */
+	historyDays: number = Number.POSITIVE_INFINITY
 ): Promise<WindowStat[]> {
 	const startToday = startOfUTCDay(now);
 
+	const all: { label: string; days: number; from: Date }[] = [
+		{ label: 'Today', days: 1, from: startToday },
+		{ label: 'Last 7 days', days: 7, from: new Date(startToday.getTime() - 6 * DAY_MS) },
+		{ label: 'Last 30 days', days: 30, from: new Date(startToday.getTime() - 29 * DAY_MS) },
+		{ label: 'Last 365 days', days: 365, from: new Date(startToday.getTime() - 364 * DAY_MS) },
+		{ label: 'All time', days: Number.POSITIVE_INFINITY, from: new Date(0) }
+	];
+	const windows = all.filter((w) => w.days <= historyDays);
+	const earliest = windows[windows.length - 1].from;
+
 	const [hourRoll, dayRoll, incidents] = await Promise.all([
 		fetchRollups(pb, monitorId, 'hour', startToday, now),
-		// all completed-day rollups (getFullList paginates); newest-first not needed
-		fetchRollups(pb, monitorId, 'day', new Date(0), startToday),
+		// completed-day rollups back to the longest window shown (getFullList paginates)
+		fetchRollups(pb, monitorId, 'day', earliest, startToday),
 		fetchIncidents(pb, monitorId)
 	]);
-
-	const windows: { label: string; from: Date }[] = [
-		{ label: 'Today', from: startToday },
-		{ label: 'Last 7 days', from: new Date(startToday.getTime() - 6 * DAY_MS) },
-		{ label: 'Last 30 days', from: new Date(startToday.getTime() - 29 * DAY_MS) },
-		{ label: 'Last 365 days', from: new Date(startToday.getTime() - 364 * DAY_MS) },
-		{ label: 'All time', from: new Date(0) }
-	];
 
 	return windows.map((w) => ({
 		label: w.label,

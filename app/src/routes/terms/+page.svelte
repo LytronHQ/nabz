@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
 	import LegalPage from '#lib/components/legal/legal-page.svelte';
-	import { GRACE_DAYS, PLANS } from '#lib/plans.js';
+	import { GRACE_DAYS, PLANS, formatHistory } from '#lib/plans.js';
 </script>
 
 <LegalPage title="Terms of Service" lastUpdated="2026-11-03">
@@ -64,9 +64,11 @@
 
 	<h2>What a lapsed plan does</h2>
 	<p>
-		<strong>Nothing you have is deleted, hidden, paused or locked</strong> because a subscription ended
-		or a payment failed. Your monitors keep running, your alert channels keep alerting, your status pages
-		stay online, and your history stays readable.
+		<strong>Nothing you have is deleted, paused or locked</strong> because a subscription ended or a
+		payment failed. Your monitors keep running, your alert channels keep alerting, and your status
+		pages stay online. Your history is kept in full: the Free plan shows the last {formatHistory(
+			PLANS.free.historyDays
+		)} of it, and the rest shows again on a plan that reaches back further.
 	</p>
 	<p>
 		What changes is what you can add. An account back on Free that is over a Free limit cannot add

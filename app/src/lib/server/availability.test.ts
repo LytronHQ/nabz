@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { getAvailabilityOverview } from './availability';
+import { getAvailabilityOverview, getAvailabilityTable } from './availability';
 
 type Row = Record<string, unknown>;
 
@@ -98,5 +98,34 @@ describe('getAvailabilityOverview 24h (#398)', () => {
 		const { pb } = fakePb({ checksTotal: 3, checksUp: 3 });
 		const r = await getAvailabilityOverview(pb, 'm1', NOW);
 		expect(r[0].dataStartMs).toBeLessThan(NOW.getTime());
+	});
+});
+
+// #703: the availability table shows only the periods the plan's history covers.
+describe('getAvailabilityTable by plan', () => {
+	const labels = async (days?: number) =>
+		(await getAvailabilityTable(fakePb({}).pb, 'm1', NOW, days)).map((r) => r.label);
+
+	it('Free (30 days) stops at the last 30 days', async () => {
+		expect(await labels(30)).toEqual(['Today', 'Last 7 days', 'Last 30 days']);
+	});
+	it('Pro (365 days) adds the last 365 days', async () => {
+		expect(await labels(365)).toEqual(['Today', 'Last 7 days', 'Last 30 days', 'Last 365 days']);
+	});
+	it('with no limit it shows all time', async () => {
+		expect(await labels()).toEqual([
+			'Today',
+			'Last 7 days',
+			'Last 30 days',
+			'Last 365 days',
+			'All time'
+		]);
+	});
+	it('reads day rollups only as far back as the longest row shown', async () => {
+		const { pb, calls } = fakePb({});
+		await getAvailabilityTable(pb, 'm1', NOW, 30);
+		expect(calls.find((c) => c.includes('"day"'))).toContain(
+			'bucket_start >= "2026-08-01 00:00:00.000Z"'
+		);
 	});
 });

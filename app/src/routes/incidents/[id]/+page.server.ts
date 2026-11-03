@@ -2,6 +2,8 @@ import { error, redirect } from '@sveltejs/kit';
 import type { PageServerLoad } from './$types';
 import { getZoneLabels } from '#lib/server/zones.js';
 import { nameZonesInText, zoneName } from '#lib/utils/zone-order.js';
+import { getAccountPlan } from '#lib/server/plan.js';
+import { historyMessage, historyStart } from '#lib/plans.js';
 
 export const load: PageServerLoad = async ({ locals, params }) => {
 	if (!locals.user) {
@@ -19,6 +21,15 @@ export const load: PageServerLoad = async ({ locals, params }) => {
 	// Ownership: the incident is only visible if its monitor belongs to the user.
 	if (!m || m.user !== locals.user.id) {
 		throw error(404, 'Incident not found');
+	}
+
+	// Outside the plan's history window (#703), unless it is still open. The
+	// incident is kept, so it shows again on a plan that reaches back to it.
+	const { plan } = await getAccountPlan(locals.pb!, locals.user);
+	const earliest = historyStart(plan);
+	const started = Date.parse(String(record.started_at ?? '').replace(' ', 'T'));
+	if (earliest && record.resolved_at && started < earliest.getTime()) {
+		throw error(403, historyMessage(plan));
 	}
 
 	const labels = await getZoneLabels(locals.pb!);

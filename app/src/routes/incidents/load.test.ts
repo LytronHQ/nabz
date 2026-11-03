@@ -18,19 +18,30 @@ type FakeList = {
 // a perPage:1 open-count (filter resolved_at=""), and — only when a filter is active —
 // a perPage:1 global-total (no filter). Distinguish them by perPage + filter.
 function fakeLocals(
-	user: { id: string } | null,
-	opts: { mainList?: FakeList; openTotal?: number; grandTotal?: number } = {}
+	user: { id: string; created?: string } | null,
+	opts: {
+		mainList?: FakeList;
+		openTotal?: number;
+		grandTotal?: number;
+		subscription?: object;
+		filters?: (string | undefined)[];
+	} = {}
 ) {
-	const { mainList, openTotal = 0, grandTotal = 0 } = opts;
+	const { mainList, openTotal = 0, grandTotal = 0, subscription, filters = [] } = opts;
 	return {
 		user,
 		pb: {
-			collection: () => ({
+			filter: (expr: string, params: Record<string, string>) =>
+				expr.replace(/\{:(\w+)\}/g, (_, k) => JSON.stringify(params[k])),
+			collection: (name: string) => ({
 				getList: async (_page: number, perPage: number, o?: { filter?: string }) => {
+					if (name === 'subscriptions')
+						return { items: subscription ? [subscription] : [], totalItems: 0 };
 					if (perPage === 1 && o?.filter === 'resolved_at = ""')
 						return { items: [], page: 1, perPage: 1, totalItems: openTotal, totalPages: 1 };
 					if (perPage === 1)
 						return { items: [], page: 1, perPage: 1, totalItems: grandTotal, totalPages: 1 };
+					filters.push(o?.filter);
 					return mainList ?? { items: [], page: 1, perPage: 10, totalItems: 0, totalPages: 0 };
 				}
 			})
@@ -92,4 +103,46 @@ test('load redirects to /signin when not authenticated', async () => {
 	await expect(
 		run({ locals: fakeLocals(null), url: new URL('http://x/incidents') })
 	).rejects.toMatchObject({ status: 303, location: '/signin' });
+});
+
+// #703: the plan decides how far back the list reaches. Free shows incidents that
+// started in the last 30 days, plus any still open; Pro reaches back a year.
+const dayStart = (daysAgo: number) => {
+	const d = new Date();
+	d.setUTCHours(0, 0, 0, 0);
+	return new Date(d.getTime() - daysAgo * 86_400_000).toISOString().replace('T', ' ');
+};
+
+test('Free lists the last 30 days of incidents, and open ones of any age', async () => {
+	const filters: (string | undefined)[] = [];
+	const res = await run({
+		locals: fakeLocals({ id: 'u1', created: '2030-01-01 00:00:00.000Z' }, { filters }),
+		url: new URL('http://x/incidents')
+	});
+	expect(filters).toEqual([`(started_at >= "${dayStart(29)}" || resolved_at = "")`]);
+	expect(res.historyMessage).toContain('last 30 days');
+});
+
+test('the window composes with the Resolved filter', async () => {
+	const filters: (string | undefined)[] = [];
+	await run({
+		locals: fakeLocals({ id: 'u1', created: '2030-01-01 00:00:00.000Z' }, { filters }),
+		url: new URL('http://x/incidents?filter=resolved')
+	});
+	expect(filters).toEqual([
+		`(started_at >= "${dayStart(29)}" || resolved_at = "") && resolved_at != ""`
+	]);
+});
+
+test('Pro reaches back a year', async () => {
+	const filters: (string | undefined)[] = [];
+	const res = await run({
+		locals: fakeLocals(
+			{ id: 'u1', created: '2030-01-01 00:00:00.000Z' },
+			{ filters, subscription: { plan: 'pro', status: 'active' } }
+		),
+		url: new URL('http://x/incidents')
+	});
+	expect(filters).toEqual([`(started_at >= "${dayStart(364)}" || resolved_at = "")`]);
+	expect(res.historyMessage).toBe('The Pro plan shows the last 1 year of history.');
 });
