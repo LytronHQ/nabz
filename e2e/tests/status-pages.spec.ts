@@ -51,6 +51,18 @@ test.describe.serial('a public status page', () => {
 
 		await page.getByRole('link', { name: 'Status pages' }).click();
 		await expect(page).toHaveURL(/\/status-pages$/);
+
+		// #706: a page on nabz.sh may not pass for nabz's own or a big brand's.
+		await page.getByLabel('Title').fill('PayPal status');
+		await page.getByLabel('Address').fill('nabz-status');
+		await page.getByRole('checkbox', { name: SHOWN }).check();
+		await page.getByRole('button', { name: 'Create page' }).click();
+		await expect(
+			page.getByText(/cannot use the name of a well-known company \("paypal"\)/)
+		).toBeVisible();
+		await expect(page.getByText('"nabz" is the name of this service')).toBeVisible();
+		await expect(page.getByText(/Your page is live/)).toHaveCount(0);
+
 		await page.getByLabel('Title').fill(`Acme ${RUN}`);
 		await page.getByLabel('Address').fill(SLUG);
 		await page.getByRole('checkbox', { name: SHOWN }).check();

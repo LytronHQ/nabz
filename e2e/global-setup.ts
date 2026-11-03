@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { seedStack } from './seed';
 
@@ -19,6 +20,24 @@ export default async function globalSetup() {
 		console.log('[e2e] bringing up the stack (builds images on first run)…');
 		execFileSync('bash', [path.join(__dirname, 'setup.sh'), 'up'], { stdio: 'inherit' });
 	}
+	// The Web Push keys setup.sh gives the evaluator and web (#602), for the same
+	// reason (#708): sharding.spec.ts's `compose up --scale` recreated the
+	// evaluator with empty keys, and every later push delivery was skipped.
+	// setup.sh exports them only in its own shell; read them from its file.
+	const vapid = path.join(__dirname, '.vapid.env');
+	if (existsSync(vapid)) {
+		const keys = Object.fromEntries(
+			readFileSync(vapid, 'utf8')
+				.split('\n')
+				.map((l) => l.trim().split(/=(.*)/s, 2))
+				.filter(([k, v]) => k && v)
+		);
+		process.env.E2E_VAPID_PUBLIC_KEY ||= keys.VAPID_PUBLIC_KEY;
+		process.env.E2E_VAPID_PRIVATE_KEY ||= keys.VAPID_PRIVATE_KEY;
+	} else {
+		console.warn('[e2e] no e2e/.vapid.env: specs that rescale the stack leave push without keys');
+	}
+
 	// Data specs read but do not create (#606), on a fresh stack or a reused one.
 	await seedStack();
 	console.log('[e2e] seeded: monitors, a dependency, a resolved incident, day rollups');

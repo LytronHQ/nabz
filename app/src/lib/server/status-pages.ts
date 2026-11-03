@@ -2,6 +2,7 @@ import type PocketBase from 'pocketbase';
 import { getAvailabilityOverview } from '#lib/server/availability.js';
 import { getAccountPlan } from '#lib/server/plan.js';
 import { statusPageLimitMessage } from '#lib/plans.js';
+import { findRefusedWord, refusedWordMessage } from '#lib/server/status-page-words.js';
 
 // Public status pages (#679). The public page at /s/<slug> is read with the web's
 // service account: nobody signs in to see it, and PocketBase grants anonymous
@@ -29,6 +30,15 @@ export function validateStatusPage(input: StatusPageInput): Record<string, strin
 	if (!SLUG_PATTERN.test(input.slug)) {
 		errors.slug =
 			'Use 3 to 40 lowercase letters, digits or dashes, starting and ending with a letter or digit.';
+	}
+	// Words a page on nabz.sh may not use (#706): nabz's own, big brands, offensive.
+	if (!errors.title) {
+		const hit = findRefusedWord(input.title);
+		if (hit) errors.title = refusedWordMessage(hit, 'title');
+	}
+	if (!errors.slug) {
+		const hit = findRefusedWord(input.slug, true);
+		if (hit) errors.slug = refusedWordMessage(hit, 'address');
 	}
 	if (input.description.length > 500)
 		errors.description = 'Keep the description to 500 characters.';
