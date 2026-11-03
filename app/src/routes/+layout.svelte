@@ -20,7 +20,8 @@
 		page.url.pathname.startsWith('/s/') ||
 			page.url.pathname === '/pricing' ||
 			page.url.pathname === '/tools' ||
-			page.url.pathname.startsWith('/tools/')
+			page.url.pathname.startsWith('/tools/') ||
+			page.url.pathname.startsWith('/compare/')
 	);
 
 	// Off-canvas sidebar drawer on small screens (#189). On desktop the sidebar is a

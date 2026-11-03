@@ -3,6 +3,7 @@
 	import { Meta } from '#lib/components/common/index.js';
 	import PublicHeader from '#lib/components/public/public-header.svelte';
 	import PricingTable from '#lib/components/pricing/pricing-table.svelte';
+	import { COMPETITORS } from '#lib/compare.js';
 </script>
 
 <Meta title="Pricing" />
@@ -36,6 +37,13 @@
 			<dt>Can I cancel any time?</dt>
 			<dd>Yes. You keep Pro until the end of the period you paid for.</dd>
 		</dl>
+
+		<p class="pr-compare">
+			How nabz compares:
+			{#each COMPETITORS as c, i (c.slug)}<a href={resolve('/compare/[slug]', { slug: c.slug })}
+					>nabz vs {c.name}</a
+				>{i < COMPETITORS.length - 1 ? ' · ' : ''}{/each}
+		</p>
 
 		<footer class="pr-foot">
 			<a href={resolve('/terms')}>Terms</a>
@@ -85,6 +93,12 @@
 		max-width: 66ch;
 		line-height: 1.6;
 	}
+	.pr-compare {
+		margin: 32px 0 0;
+		font-size: 14px;
+		color: var(--ink-2);
+	}
+	.pr-compare a,
 	.pr-faq a,
 	.pr-foot a {
 		color: var(--accent);

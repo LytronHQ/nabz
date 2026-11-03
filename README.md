@@ -4,8 +4,9 @@ Region-aware uptime monitoring: define URLs, get up/down status **confirmed acro
 zones**, with incidents and email/webhook alerts. Go workers + a central
 evaluator on top of PocketBase, with a SvelteKit UI.
 
-Open source under the [AGPL-3.0](LICENSE), with a paid hosted version at
-[nabz.sh](https://nabz.sh) — see [License & hosting](#license--hosting).
+Open source under the [AGPL-3.0](LICENSE), with a hosted version at
+[nabz.sh](https://nabz.sh) (a Free plan and a Pro plan, see
+[pricing](https://nabz.sh/pricing)) — see [License & hosting](#license--hosting).
 
 ## What it does
 
@@ -181,5 +182,6 @@ Practically, for the common cases:
   is the case it deliberately does not allow.
 
 **Hosted at [nabz.sh](https://nabz.sh)** for people who would rather not run it: the
-same software, operated for you, on a paid plan. Running it yourself costs nothing
-and is missing nothing — the hosted offering sells the operating, not the features.
+same software, operated for you, on a Free plan or a paid Pro plan
+([pricing](https://nabz.sh/pricing)). Running it yourself costs nothing and has no
+plan limits — the hosted offering sells the operating, not the features.
