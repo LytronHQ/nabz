@@ -2,6 +2,12 @@
 
 Notable changes to nabz. Newest first.
 
+## v0.13.3
+
+_2026-11-03_
+
+- **The tools link has one name everywhere** — the home page called it Free tools and the top bar of the tools, pricing and comparison pages called it Tools. It is Free tools in every top bar now.
+
 ## v0.13.2
 
 _2026-11-03_

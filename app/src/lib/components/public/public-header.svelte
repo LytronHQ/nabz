@@ -20,7 +20,7 @@
 		<b>nabz</b>
 	</a>
 	<nav class="ph-links" aria-label="Site">
-		<a href={resolve('/tools')}>Tools</a>
+		<a href={resolve('/tools')}>Free tools</a>
 		<a href={resolve('/pricing')}>Pricing</a>
 		<a href={resolve('/signin')}>Sign in</a>
 		<ThemeToggle />
@@ -65,6 +65,8 @@
 	}
 	.ph-links a {
 		color: var(--ink);
+		/* A label that wraps breaks the bar on a phone (#695, #700). */
+		white-space: nowrap;
 	}
 	@media (max-width: 420px) {
 		.ph-links {
