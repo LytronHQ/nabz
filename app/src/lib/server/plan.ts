@@ -73,6 +73,7 @@ export type PlanUsage = {
 	monitors: number | null;
 	monitorLimit: number;
 	minIntervalSeconds: number;
+	historyDays: number;
 	channelTypes: string[];
 	allChannels: boolean;
 	/** False on a self-hosted install, where nothing is limited (#694). */
@@ -98,6 +99,7 @@ export async function getPlanUsage(
 		monitors,
 		monitorLimit: plan.monitors,
 		minIntervalSeconds: plan.minIntervalSeconds,
+		historyDays: plan.historyDays,
 		channelTypes: [...plan.channelTypes],
 		allChannels: plan.channelTypes.length === AlertChannelTypes.length,
 		limited: reason !== 'self-hosted',

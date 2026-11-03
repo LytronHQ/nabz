@@ -616,13 +616,25 @@
 		</table>
 	</div>
 	<div class="calc">
-		<label>From <input type="date" bind:value={fromDate} max={toDate} /></label>
+		<label
+			>From <input
+				type="date"
+				bind:value={fromDate}
+				min={data.history.start ?? undefined}
+				max={toDate}
+			/></label
+		>
 		<label>To <input type="date" bind:value={toDate} /></label>
 		<button type="button" class="btn btn-ghost" onclick={calcCustom} disabled={calcLoading}>
 			{calcLoading ? 'Calculating…' : 'Calculate'}
 		</button>
 		{#if calcError}<span class="down-txt" style="font-size:12.5px">{calcError}</span>{/if}
 	</div>
+	{#if data.history.message}
+		<p class="history-note">
+			{data.history.message} <a href={resolve('/pricing')}>See plans</a>
+		</p>
+	{/if}
 </div>
 
 <!-- recent checks -->
@@ -858,6 +870,12 @@
 		border: 1px solid var(--border);
 		border-radius: var(--radius-btn);
 		padding: 4px 8px;
+	}
+	.history-note {
+		margin: 0;
+		padding: 0 16px 14px;
+		font-size: 12.5px;
+		color: var(--ink-3);
 	}
 	.custom-row {
 		border-top: 2px solid var(--border-strong);

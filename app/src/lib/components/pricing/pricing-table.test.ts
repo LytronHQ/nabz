@@ -3,7 +3,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import PricingTable from './pricing-table.svelte';
 import Terms from '../../../routes/terms/+page.svelte';
 import Refunds from '../../../routes/refunds/+page.svelte';
-import { PLANS, PRO_ON_SALE, formatInterval } from '#lib/plans.js';
+import { PLANS, PRO_ON_SALE, formatHistory, formatInterval } from '#lib/plans.js';
 
 // #682: what the pricing page, the terms and the refund policy advertise must be
 // what plans.ts enforces. inkla once advertised one limit and enforced another.
@@ -27,6 +27,10 @@ describe('pricing reads plans.ts', () => {
 			expect(text).toContain(`${p.monitors} monitors`);
 			expect(text).toContain(`Checks every ${formatInterval(p.minIntervalSeconds)}`);
 			expect(text).toContain(`${p.statusPages} status ${p.statusPages === 1 ? 'page' : 'pages'}`);
+			// #703
+			expect(text.toLowerCase()).toContain(
+				`${formatHistory(p.historyDays)} of uptime and incident history`
+			);
 		}
 		expect(text).toContain(`${usd(PLANS.pro.priceMonthlyUsd)} a month`);
 		expect(text).toContain(`${usd(PLANS.pro.priceYearlyUsd)} a year`);
@@ -46,5 +50,18 @@ describe('pricing reads plans.ts', () => {
 		for (const page of [Terms, Refunds]) {
 			expect(flat(render(page).container)).toContain(price);
 		}
+	});
+
+	// #703: Free shows only part of the history, so no page may promise that
+	// nothing is hidden; each says how much Free shows, and that all of it is kept.
+	it('the pricing note, terms and refunds say how much history Free shows', () => {
+		const days = formatHistory(PLANS.free.historyDays);
+		for (const page of [Terms, Refunds]) {
+			const text = flat(render(page).container);
+			expect(text).toMatch(new RegExp(`Free (plan )?shows the last ${days}`));
+			expect(text).toMatch(/history is kept/);
+			expect(text).not.toMatch(/hidden/i);
+		}
+		expect(flat(render(PricingTable).container)).not.toMatch(/hides/i);
 	});
 });

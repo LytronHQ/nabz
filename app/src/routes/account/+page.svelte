@@ -3,7 +3,7 @@
 	import { resolve } from '$app/paths';
 	import { Meta, PageHeader, Pill, ProviderMark } from '#lib/components/common/index.js';
 	import { providerLabel } from '#lib/utils/oauth-providers.js';
-	import { formatInterval, listChannels } from '#lib/plans.js';
+	import { formatHistory, formatInterval, listChannels } from '#lib/plans.js';
 	import type { ActionData, PageData } from './$types';
 
 	interface Props {
@@ -188,6 +188,10 @@
 				<div class="acct-plan__row">
 					<dt>Alert channels</dt>
 					<dd>{channelText}</dd>
+				</div>
+				<div class="acct-plan__row">
+					<dt>History shown</dt>
+					<dd>Last {formatHistory(plan.historyDays)}</dd>
 				</div>
 			</dl>
 			<p class="acct-note">

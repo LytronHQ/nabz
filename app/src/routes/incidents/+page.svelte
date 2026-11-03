@@ -129,3 +129,17 @@
 		<Pagination data={pagination} onupdate={onPage} />
 	</div>
 {/if}
+
+{#if data.historyMessage}
+	<p class="history-note">
+		{data.historyMessage} <a href={resolve('/pricing')}>See plans</a>
+	</p>
+{/if}
+
+<style>
+	.history-note {
+		margin: 14px 0 0;
+		font-size: 12.5px;
+		color: var(--ink-3);
+	}
+</style>

@@ -6,6 +6,8 @@ import { getOpenIncidentForMonitor } from '#lib/server/incidents.js';
 import { getAvailabilityTable, getAvailabilityOverview } from '#lib/server/availability.js';
 import { getZones } from '#lib/server/zones.js';
 import type { ZoneLabel } from '#lib/utils/zone-order.js';
+import { getAccountPlan } from '#lib/server/plan.js';
+import { historyMessage, historyStart } from '#lib/plans.js';
 
 export const load: PageServerLoad = async ({ locals, params }) => {
 	if (!locals.user) {
@@ -21,12 +23,14 @@ export const load: PageServerLoad = async ({ locals, params }) => {
 		throw error(404, 'Monitor not found');
 	}
 
+	// How far back this account's plan shows history (#703).
+	const { plan } = await getAccountPlan(locals.pb!, locals.user);
 	const [uptime24h, checks, openIncident, availability, availabilityOverview, zones] =
 		await Promise.all([
 			computeUptime24h(locals.pb!, record.id),
 			fetchRecentChecks(locals.pb!, record.id, 24),
 			getOpenIncidentForMonitor(locals.pb!, record.id),
-			getAvailabilityTable(locals.pb!, record.id),
+			getAvailabilityTable(locals.pb!, record.id, new Date(), plan.historyDays),
 			getAvailabilityOverview(locals.pb!, record.id),
 			// Names and order for the zones this page shows, as the form and the
 			// dashboard have them (#558).
@@ -43,6 +47,14 @@ export const load: PageServerLoad = async ({ locals, params }) => {
 		openIncident,
 		availability,
 		availabilityOverview,
+		history: (() => {
+			const start = historyStart(plan);
+			return {
+				// YYYY-MM-DD, the custom range's earliest From date; null = no limit.
+				start: start ? start.toISOString().slice(0, 10) : null,
+				message: start ? historyMessage(plan) : ''
+			};
+		})(),
 		zoneLabels,
 		checks: checks.map((c) => ({
 			checked_at: c.checked_at,

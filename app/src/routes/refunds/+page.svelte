@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
 	import LegalPage from '#lib/components/legal/legal-page.svelte';
-	import { PLANS } from '#lib/plans.js';
+	import { PLANS, formatHistory } from '#lib/plans.js';
 </script>
 
 <LegalPage title="Refund Policy" lastUpdated="2026-11-03">
@@ -59,9 +59,10 @@
 
 	<h2>What a refund does to your monitors</h2>
 	<p>
-		<strong>Nothing is deleted, hidden or paused.</strong> An account back on Free keeps every
-		monitor, channel and status page it has, and they keep running. A Free limit only ever refuses
-		something new. The <a href={resolve('/terms')}>terms</a> say exactly what changes.
+		<strong>Nothing is deleted or paused.</strong> An account back on Free keeps every monitor,
+		channel and status page it has, and they keep running, and all of its history is kept; Free
+		shows the last {formatHistory(PLANS.free.historyDays)} of it. A Free limit only ever refuses something
+		new. The <a href={resolve('/terms')}>terms</a> say exactly what changes.
 	</p>
 
 	<h2>Asking</h2>

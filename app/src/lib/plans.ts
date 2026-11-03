@@ -27,10 +27,11 @@ export interface Plan {
 	priceMonthlyUsd: number;
 	priceYearlyUsd: number;
 	/**
-	 * How long check history is kept, in days. NOT applied yet: nothing prunes by
-	 * plan today, so no page may promise this number until something does.
+	 * How far back the pages show history, in days (#703): availability, the custom
+	 * range and incidents. Nothing is deleted by plan: daily rollups and incidents
+	 * are kept for every account, so moving to Pro shows the older history again.
 	 */
-	retentionDays: number;
+	historyDays: number;
 }
 
 export const PLANS: Record<PlanId, Plan> = {
@@ -44,7 +45,7 @@ export const PLANS: Record<PlanId, Plan> = {
 		statusPageFooter: true,
 		priceMonthlyUsd: 0,
 		priceYearlyUsd: 0,
-		retentionDays: 30
+		historyDays: 30
 	},
 	pro: {
 		id: 'pro',
@@ -57,7 +58,7 @@ export const PLANS: Record<PlanId, Plan> = {
 		// Owner's decision, 2026-11-03: $9 a month or $90 a year (two months free).
 		priceMonthlyUsd: 9,
 		priceYearlyUsd: 90,
-		retentionDays: 365
+		historyDays: 365
 	}
 };
 
@@ -76,7 +77,7 @@ export const SELF_HOSTED: Plan = {
 	statusPageFooter: false,
 	priceMonthlyUsd: 0,
 	priceYearlyUsd: 0,
-	retentionDays: Number.POSITIVE_INFINITY
+	historyDays: Number.POSITIVE_INFINITY
 };
 
 /**
@@ -220,4 +221,29 @@ export function statusPageLimitMessage(plan: Plan): string {
 		`Your ${plan.name} plan includes ${n} status ${n === 1 ? 'page' : 'pages'}, and you have reached that. ` +
 		'Your pages stay online. To add another, remove one you no longer need.'
 	);
+}
+
+/**
+ * The earliest moment a plan shows history from (#703): the start of the UTC day
+ * `historyDays - 1` days before today, so "30 days" means today and the 29 before
+ * it, the same span as the "Last 30 days" row. Null when the plan has no limit.
+ */
+export function historyStart(plan: Plan, now: number = Date.now()): Date | null {
+	if (!Number.isFinite(plan.historyDays)) return null;
+	const day = 86_400_000;
+	const startToday = Math.floor(now / day) * day;
+	return new Date(startToday - (plan.historyDays - 1) * day);
+}
+
+/** "30 days" or "1 year", for the pricing table, the plan card and the messages. */
+export function formatHistory(days: number): string {
+	if (!Number.isFinite(days)) return 'all of it';
+	if (days % 365 === 0) return days === 365 ? '1 year' : `${days / 365} years`;
+	return `${days} days`;
+}
+
+export function historyMessage(plan: Plan): string {
+	const shown = `The ${plan.name} plan shows the last ${formatHistory(plan.historyDays)} of history.`;
+	if (plan.historyDays >= PLANS.pro.historyDays) return shown;
+	return `${shown} Older history is kept, and Pro shows ${formatHistory(PLANS.pro.historyDays)} of it.`;
 }

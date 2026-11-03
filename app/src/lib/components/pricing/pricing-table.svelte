@@ -2,7 +2,7 @@
 	// The plans side by side (#682), on /pricing and the landing page. Every number
 	// comes from plans.ts, so what is advertised is what is enforced.
 	import { resolve } from '$app/paths';
-	import { PLANS, PRO_ON_SALE, formatInterval, listChannels } from '#lib/plans.js';
+	import { PLANS, PRO_ON_SALE, formatHistory, formatInterval, listChannels } from '#lib/plans.js';
 	import { AlertChannelTypes } from '#lib/models/alert-channel.js';
 
 	const free = PLANS.free;
@@ -26,6 +26,7 @@
 			<li>Checks every {formatInterval(free.minIntervalSeconds)}</li>
 			<li>{channels(free)}</li>
 			<li>{pages(free)}</li>
+			<li>{cap(formatHistory(free.historyDays))} of uptime and incident history</li>
 		</ul>
 		<a class="btn btn-ghost pt-cta" href={resolve('/signup')}>Start free</a>
 	</section>
@@ -44,6 +45,7 @@
 			<li>Checks every {formatInterval(pro.minIntervalSeconds)}</li>
 			<li>{channels(pro)}</li>
 			<li>{pages(pro)}</li>
+			<li>{cap(formatHistory(pro.historyDays))} of uptime and incident history</li>
 		</ul>
 		{#if PRO_ON_SALE}
 			<a class="btn btn-primary pt-cta" href={resolve('/account')}>Get Pro</a>
@@ -54,7 +56,8 @@
 </div>
 
 <p class="pt-note">
-	A lapsed plan never deletes, hides or pauses anything. Limits only refuse what you add next.
+	A lapsed plan never deletes or pauses anything, and history is kept in full. Limits only refuse
+	what you add next.
 </p>
 
 <style>
