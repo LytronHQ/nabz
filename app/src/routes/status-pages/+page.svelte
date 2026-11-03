@@ -33,7 +33,11 @@
 <div class="card">
 	<div class="card__h">
 		<h3>Your pages</h3>
-		<span class="hint">{data.pages.length} of {data.limit} on {data.planName}</span>
+		<span class="hint"
+			>{data.limited
+				? `${data.pages.length} of ${data.limit} on ${data.planName}`
+				: `${data.pages.length}`}</span
+		>
 	</div>
 	{#if data.pages.length === 0}
 		<p class="spm-empty">No status pages yet.</p>

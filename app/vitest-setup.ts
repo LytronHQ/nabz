@@ -1,7 +1,7 @@
 import '@testing-library/svelte/vitest';
 import '@testing-library/jest-dom';
 import * as matchers from '@testing-library/jest-dom/matchers';
-import { expect } from 'vitest';
+import { expect, vi } from 'vitest';
 
 expect.extend(matchers);
 
@@ -16,3 +16,11 @@ class ResizeObserverStub implements ResizeObserver {
 	disconnect(): void {}
 }
 globalThis.ResizeObserver ??= ResizeObserverStub;
+
+// Plan limits apply only on nabz's own hosted service (HOSTED_PLANS=true), never on
+// a self-hosted install. The plan tests are about the hosted rules, so every test
+// starts hosted; a test of the self-hosted path mocks it off.
+vi.mock('$app/env/private', async (importOriginal) => ({
+	...((await importOriginal()) as object),
+	HOSTED_PLANS: 'true'
+}));

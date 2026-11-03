@@ -2,6 +2,13 @@
 
 Notable changes to nabz. Newest first.
 
+## v0.13.1
+
+_2026-11-03_
+
+- **The home page's top bar fits on a phone again** — on narrow screens the links wrapped onto two lines, Get started ran into the edge and the theme switch was pushed off the screen. The line under the "Try it free" box reads as one sentence again.
+- **A self-hosted nabz has no plan limits** — v0.13.0's Free and Pro limits applied to every install, so a self-hosted server put new accounts on Free. They apply only to the hosted service at nabz.sh now; your own server has every monitor, check interval, channel and status page.
+
 ## v0.13.0
 
 _2026-11-03_

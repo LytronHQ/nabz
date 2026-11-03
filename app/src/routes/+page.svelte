@@ -104,11 +104,14 @@
 					</button>
 				</form>
 				{#if tryError}<p class="lp-try-err" role="alert">{tryError}</p>{/if}
+				<!-- One text span: in this flex row every bare text run was its own flex
+				     item, so on a phone the sentence broke into three columns (#695). -->
 				<p class="lp-beta">
 					<span class="dot"></span>
-					No signup — watch it work, then
-					<a href={resolve('signup')}>create an account</a>
-					to keep it on the Free plan.
+					<span
+						>No signup — watch it work, then <a href={resolve('signup')}>create an account</a> to keep
+						it on the Free plan.</span
+					>
 				</p>
 			</div>
 
@@ -441,6 +444,10 @@
 		color: var(--ink-2);
 		text-decoration: none;
 		font-size: 14px;
+		white-space: nowrap;
+	}
+	.lp-nav-links .btn {
+		white-space: nowrap;
 	}
 	.lp-nav-links a:not(.btn):hover {
 		color: var(--ink);
@@ -508,13 +515,15 @@
 	}
 	.lp-beta {
 		display: flex;
-		align-items: center;
+		align-items: flex-start;
 		gap: 8px;
 		margin-top: 16px;
 		font-size: 13.5px;
 		color: var(--ink-3);
 	}
 	.lp-beta .dot {
+		flex: 0 0 7px;
+		margin-top: 0.5em;
 		width: 7px;
 		height: 7px;
 		border-radius: 50%;
@@ -729,6 +738,21 @@
 		.lp-footer .lp-muted {
 			order: 3;
 			color: var(--ink-3);
+		}
+		/* The top bar had no room for Free tools and Pricing at 390 px: links
+		   wrapped, Get started hit the edge and the theme toggle was pushed off
+		   (#695). Both stay in the footer below. */
+		.lp-nav-links a[href='/tools'],
+		.lp-nav-links a[href='/pricing'] {
+			display: none;
+		}
+		.lp-nav-links {
+			gap: 14px;
+		}
+		.lp-footer-links {
+			flex-wrap: wrap;
+			justify-content: center;
+			row-gap: 8px;
 		}
 	}
 	@media (max-width: 480px) {

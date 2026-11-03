@@ -48,6 +48,7 @@ WEB_URL = "https://nabz.sh"
 WEB_PB_COLLECTION = "service_accounts"
 HEALTH_STALE_SECONDS = "90"
 
+
 # --- staging (#343) -----------------------------------------------------------
 # A pre-prod fleet for a last eyeball check in a real cloud before releasing.
 # Its own Worker, own hostnames, own PocketBase — nothing is shared with

@@ -154,40 +154,47 @@
 		<span class="hint">{plan.planName}</span>
 	</div>
 	<div class="acct-body">
-		<p class="acct-current">
-			You are on the <strong>{plan.planName}</strong> plan{#if plan.reason === 'launch'}, free for
-				accounts that joined before plans existed{/if}.
-		</p>
-		<dl class="acct-plan">
-			<div class="acct-plan__row">
-				<dt>Monitors</dt>
-				<dd>
-					{#if plan.monitors === null}
-						Up to {plan.monitorLimit}
-					{:else}
-						{plan.monitors} of {plan.monitorLimit}
-					{/if}
-					<span
-						class="acct-plan__meter"
-						class:acct-plan__meter--full={plan.monitors !== null &&
-							plan.monitors >= plan.monitorLimit}
-						role="presentation"><span style="inline-size:{monitorShare}%"></span></span
-					>
-				</dd>
-			</div>
-			<div class="acct-plan__row">
-				<dt>Fastest check</dt>
-				<dd>Every {formatInterval(plan.minIntervalSeconds)}</dd>
-			</div>
-			<div class="acct-plan__row">
-				<dt>Alert channels</dt>
-				<dd>{channelText}</dd>
-			</div>
-		</dl>
-		<p class="acct-note">
-			Limits apply when you add something or make a check faster. What you already have keeps
-			running. Paid plans are not on sale yet.
-		</p>
+		{#if !plan.limited}
+			<p class="acct-current">
+				This nabz runs on its own servers, so there are no plan limits: every monitor, check
+				interval, channel and status page is available.
+			</p>
+		{:else}
+			<p class="acct-current">
+				You are on the <strong>{plan.planName}</strong> plan{#if plan.reason === 'launch'}, free for
+					accounts that joined before plans existed{/if}.
+			</p>
+			<dl class="acct-plan">
+				<div class="acct-plan__row">
+					<dt>Monitors</dt>
+					<dd>
+						{#if plan.monitors === null}
+							Up to {plan.monitorLimit}
+						{:else}
+							{plan.monitors} of {plan.monitorLimit}
+						{/if}
+						<span
+							class="acct-plan__meter"
+							class:acct-plan__meter--full={plan.monitors !== null &&
+								plan.monitors >= plan.monitorLimit}
+							role="presentation"><span style="inline-size:{monitorShare}%"></span></span
+						>
+					</dd>
+				</div>
+				<div class="acct-plan__row">
+					<dt>Fastest check</dt>
+					<dd>Every {formatInterval(plan.minIntervalSeconds)}</dd>
+				</div>
+				<div class="acct-plan__row">
+					<dt>Alert channels</dt>
+					<dd>{channelText}</dd>
+				</div>
+			</dl>
+			<p class="acct-note">
+				Limits apply when you add something or make a check faster. What you already have keeps
+				running. Paid plans are not on sale yet.
+			</p>
+		{/if}
 	</div>
 </div>
 

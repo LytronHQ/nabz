@@ -272,6 +272,9 @@ VAPID_PUBLIC_KEY=${VAPID_PUBLIC_KEY:-}
 # discards a Secure cookie on an http:// origin, and the symptom is a sign-in that
 # bounces back to /signin as though the password were wrong.
 COOKIE_SECURE=${COOKIE_SECURE:-true}
+# nabz.sh's Free/Pro limits (#694). Off unless the env file says HOSTED_PLANS=true:
+# this script also deploys self-hosted fleets, which must have no limits.
+HOSTED_PLANS=${HOSTED_PLANS:-}
 EOF
 }
 # public_worker_config_ok — what a public worker cannot run without. Prints
