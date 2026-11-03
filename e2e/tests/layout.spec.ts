@@ -11,6 +11,8 @@ const PAGES = [
 	'/pricing',
 	'/tools',
 	'/tools/website',
+	'/compare/uptimerobot',
+	'/compare/better-stack',
 	'/terms',
 	'/privacy',
 	'/refunds',

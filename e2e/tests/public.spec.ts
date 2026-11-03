@@ -27,7 +27,9 @@ for (const path of [
 	'/refunds',
 	'/pricing',
 	'/tools',
-	'/tools/website'
+	'/tools/website',
+	'/compare/uptimerobot',
+	'/compare/better-stack'
 ]) {
 	test(`public page ${path} renders without errors`, async ({ page }) => {
 		const errors: string[] = [];

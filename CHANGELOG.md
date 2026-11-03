@@ -2,6 +2,12 @@
 
 Notable changes to nabz. Newest first.
 
+## v0.13.2
+
+_2026-11-03_
+
+- **How nabz compares** — pages comparing nabz with UptimeRobot and Better Stack, linked from the pricing page. Every figure about them comes from their own pages, with the date it was read, and each page says where they are ahead.
+
 ## v0.13.1
 
 _2026-11-03_
