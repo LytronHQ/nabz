@@ -1,6 +1,6 @@
 import type { LayoutServerLoad } from './$types';
 import { ADMIN_EMAILS } from '$app/env/private';
-import { isAdmin } from '#lib/server/admin.js';
+import { isAdminUser } from '#lib/server/admin.js';
 
 export const load: LayoutServerLoad = async ({ locals, url }) => {
 	// Read the path so SvelteKit reruns this on every navigation. Without a
@@ -13,6 +13,6 @@ export const load: LayoutServerLoad = async ({ locals, url }) => {
 		user: locals.user,
 		// Drives the admin-only nav link. The /admin routes gate server-side
 		// regardless — this just decides whether to show the link.
-		isAdmin: isAdmin(locals.user?.email, ADMIN_EMAILS)
+		isAdmin: isAdminUser(locals.user, ADMIN_EMAILS)
 	};
 };

@@ -6,16 +6,30 @@ const { migrateAnonMonitors } = await import('./anon-migrate');
 
 type AnonRow = Record<string, unknown> & { id: string };
 
+// The account the trial moves into (#678): how many monitors it already has, its
+// subscription row, and when it was created. The default is a new Free account.
+type Account = { monitors?: number; sub?: Record<string, unknown> | null; created?: string };
+
 function fakePb(
 	anonRows: AnonRow[],
 	created: Record<string, unknown>[],
 	deleted: string[],
-	failCreateFor?: string
+	failCreateFor?: string,
+	account: Account = {}
 ) {
 	return {
 		filter: (expr: string, params: Record<string, unknown>) => ({ expr, params }),
 		collection(name: string) {
 			return {
+				getList: async () => {
+					if (name === 'users')
+						return {
+							items: [{ id: 'user-123', created: account.created ?? '2030-01-01 00:00:00Z' }]
+						};
+					if (name === 'subscriptions') return { items: account.sub ? [account.sub] : [] };
+					if (name === 'monitors') return { items: [], totalItems: account.monitors ?? 0 };
+					throw new Error('unexpected getList on ' + name);
+				},
 				getFullList: async () => (name === 'anon_monitors' ? anonRows : []),
 				create: async (data: Record<string, unknown>) => {
 					if (name !== 'monitors') throw new Error('unexpected create on ' + name);
@@ -113,4 +127,66 @@ test('returns 0 (never throws into signup) when the backend read fails', async (
 	};
 	vi.mocked(serviceClient).mockResolvedValue(pb as never);
 	expect(await migrateAnonMonitors('sess', 'user-123')).toBe(0);
+});
+
+// Plan limits (#678).
+
+test('leaves the trial behind when the account is already at its Free monitor limit', async () => {
+	const created: Record<string, unknown>[] = [];
+	const deleted: string[] = [];
+	const rows: AnonRow[] = [
+		{ id: 'a1', name: 'one', type: 'website', target: 'https://one.example', interval: 300 }
+	];
+	vi.mocked(serviceClient).mockResolvedValue(
+		fakePb(rows, created, deleted, undefined, { monitors: 10 }) as never
+	);
+	vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+	expect(await migrateAnonMonitors('sess', 'user-123')).toBe(0);
+	expect(created).toHaveLength(0);
+	expect(deleted).toEqual([]); // still in anon_monitors, to expire with the session
+});
+
+test('moves only as many trials as the plan has room for', async () => {
+	const created: Record<string, unknown>[] = [];
+	const deleted: string[] = [];
+	const rows: AnonRow[] = [
+		{ id: 'a1', name: 'one', type: 'website', target: 'https://one.example', interval: 300 },
+		{ id: 'a2', name: 'two', type: 'website', target: 'https://two.example', interval: 300 }
+	];
+	vi.mocked(serviceClient).mockResolvedValue(
+		fakePb(rows, created, deleted, undefined, { monitors: 9 }) as never
+	);
+	vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+	expect(await migrateAnonMonitors('sess', 'user-123')).toBe(1);
+	expect(deleted).toEqual(['a1']);
+});
+
+test('a Pro account takes the trial even past the Free monitor limit', async () => {
+	const created: Record<string, unknown>[] = [];
+	const deleted: string[] = [];
+	const rows: AnonRow[] = [
+		{ id: 'a1', name: 'one', type: 'website', target: 'https://one.example', interval: 300 }
+	];
+	vi.mocked(serviceClient).mockResolvedValue(
+		fakePb(rows, created, deleted, undefined, {
+			monitors: 10,
+			sub: { plan: 'pro', status: 'active' }
+		}) as never
+	);
+
+	expect(await migrateAnonMonitors('sess', 'user-123')).toBe(1);
+	expect(created[0]).toMatchObject({ user: 'user-123', interval: 300 });
+});
+
+test('a trial interval below the plan minimum is raised to it', async () => {
+	const created: Record<string, unknown>[] = [];
+	const rows: AnonRow[] = [
+		{ id: 'a1', name: 'one', type: 'website', target: 'https://one.example', interval: 60 }
+	];
+	vi.mocked(serviceClient).mockResolvedValue(fakePb(rows, created, []) as never);
+
+	await migrateAnonMonitors('sess', 'user-123');
+	expect(created[0].interval).toBe(300);
 });

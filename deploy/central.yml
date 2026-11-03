@@ -27,6 +27,8 @@ services:
       - SMTP_PASSWORD=${SMTP_PASSWORD:-}
       - SMTP_FROM=${SMTP_FROM:-}
       - OPS_WEBHOOK_URL=${OPS_WEBHOOK_URL:-}
+      # Alerts to private addresses are refused unless "true" (dev only, #669).
+      - ALLOW_PRIVATE_TARGETS=${ALLOW_PRIVATE_TARGETS:-}
       # Web Push alerts (#602): unset keys = push channels skipped.
       - VAPID_PUBLIC_KEY=${VAPID_PUBLIC_KEY:-}
       - VAPID_PRIVATE_KEY=${VAPID_PRIVATE_KEY:-}
@@ -40,6 +42,9 @@ services:
       # minimal public tier.
       - HEALTH_ADDR=${HEALTH_ADDR:-:8080}
       - HEALTH_DEBUG_TOKEN=${HEALTH_DEBUG_TOKEN:-}
+      # With the token, the evaluator drives the web's check-in path beat over
+      # this URL every minute; the Cron Trigger alone ran late (#656).
+      - WEB_URL=${WEB_URL:-}
     ports:
       - "${HEALTH_PORT:-8080}:8080"
     healthcheck:

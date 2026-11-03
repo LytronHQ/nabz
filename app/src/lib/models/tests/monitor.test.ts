@@ -267,3 +267,22 @@ test('toMonitorConfig persists non-default DNS options only', () => {
 	});
 	expect(toMonitorConfig(a)?.dnsRecordType).toBeUndefined();
 });
+
+// The name goes into alert email subjects: a line break there used to start new
+// headers (#670).
+test('a monitor name cannot contain line breaks or control characters', () => {
+	for (const name of ['shop\r\nReply-To: x@evil.example', 'shop\nx', 'tab\there', 'nul\u0000']) {
+		const v = new MonitorItemValidator(
+			new MonitorNewItem({ name, type: 'website', target: 'https://example.com', interval: 60 })
+		);
+		expect(v.isValid, JSON.stringify(name)).toBe(false);
+		expect(v.validationErrors?.some((e) => e.field === 'name')).toBe(true);
+	}
+	const ok = new MonitorNewItem({
+		name: 'Shop — main (EU) ✓',
+		type: 'website',
+		target: 'https://example.com',
+		interval: 60
+	});
+	expect(new MonitorItemValidator(ok).isValid).toBe(true);
+});

@@ -58,6 +58,11 @@ if [ "$MODE" != "--remove" ]; then
 fi
 
 CHECK_FREQUENCY="${CHECK_FREQUENCY:-180}"   # 3 min, comfortably inside the free tier
+# How long a failure must last before Better Stack opens an incident on the health
+# monitors. The Singapore worker loses pb.nabz.sh for a minute or two over
+# Cloudflare's SIN -> Germany leg; /api/health rightly reports the zone stale, but
+# with no customer impact it paged Telegram twice on 2026-10-26 (#661).
+CONFIRMATION_PERIOD="${CONFIRMATION_PERIOD:-120}"
 BS="https://uptime.betterstack.com/api/v2/monitors"
 BS_WH="https://uptime.betterstack.com/api/v2/outgoing-webhooks"
 BS_HB="https://uptime.betterstack.com/api/v2/heartbeats"
@@ -139,7 +144,8 @@ upsert_monitor "nabz site (${ENV_NAME})" "$WEB_URL" '{"monitor_type":"status"}'
 
 # Public health tier: a 200 is not enough — the body has to say ok.
 upsert_monitor "nabz health (${ENV_NAME})" "${WEB_URL%/}/api/health" \
-  '{"monitor_type":"keyword","required_keyword":"\"status\":\"ok\""}'
+  "$(jq -nc --argjson c "$CONFIRMATION_PERIOD" \
+    '{monitor_type:"keyword", required_keyword:"\"status\":\"ok\"", confirmation_period:$c}')"
 
 # PocketBase is behind Access and 403s anything without a service token, so it is
 # watched THROUGH the health endpoint's debug tier instead of directly.
@@ -147,9 +153,9 @@ upsert_monitor "nabz health (${ENV_NAME})" "${WEB_URL%/}/api/health" \
 # because the upsert is keyed on URL — without it this monitor and the public one
 # collide and each re-run overwrites the other.
 upsert_monitor "nabz pocketbase (${ENV_NAME})" "${WEB_URL%/}/api/health?probe=pocketbase" \
-  "$(jq -nc --arg h "Bearer $HEALTH_DEBUG_TOKEN" \
+  "$(jq -nc --arg h "Bearer $HEALTH_DEBUG_TOKEN" --argjson c "$CONFIRMATION_PERIOD" \
     '{monitor_type:"keyword", required_keyword:"\"name\":\"pocketbase\",\"status\":\"ok\"",
-      request_headers:[{name:"Authorization", value:$h}]}')"
+      request_headers:[{name:"Authorization", value:$h}], confirmation_period:$c}')"
 
 # --- Telegram, via Better Stack outgoing webhooks -----------------------------
 # Better Stack has no Telegram integration, but it can POST an arbitrary body to
@@ -266,7 +272,8 @@ fi
 PING_URL="$(jq -r '.data.attributes.url // empty' <<<"$hb")"
 [ -n "$PING_URL" ] || die "Better Stack heartbeat: no url returned — $(jq -c '.' <<<"$hb")"
 echo "   period 5m, grace 5m"
-echo "   ping URL: $PING_URL"
+# Never print the URL: its last segment is the heartbeat's secret, and this runs
+# in the infra-watch workflow, whose log every collaborator can read (#656).
 echo "   (nothing to store — remote-deploy.sh reads it back from this same API)"
 
 # A second heartbeat for the nightly PocketBase maintenance run (#322). A backup
@@ -292,7 +299,6 @@ fi
 MAINT_PING_URL="$(jq -r '.data.attributes.url // empty' <<<"$mhb")"
 [ -n "$MAINT_PING_URL" ] || die "Better Stack maintenance heartbeat: no url returned"
 echo "   period 24h, grace 6h"
-echo "   ping URL: $MAINT_PING_URL"
 
 echo
 echo "Alerting is NOT fully configured here: Better Stack has no Telegram"

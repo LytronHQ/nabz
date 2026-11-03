@@ -20,6 +20,8 @@
 		{item}
 		availableZones={data.availableZones}
 		availablePolicies={data.availablePolicies}
+		minInterval={data.plan.minIntervalSeconds}
+		planName={data.plan.planName}
 		title={`Edit ${data.monitor.name}`}
 		submitText="Save changes"
 		backHref={resolve('/monitors/[id]', { id: data.monitor.id! })}

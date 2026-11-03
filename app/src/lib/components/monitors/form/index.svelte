@@ -16,6 +16,7 @@
 		type: MonitorType | '';
 	};
 	import { TagInput } from '#lib/components/monitors/tag-input/index.js';
+	import { formatInterval } from '#lib/plans.js';
 
 	interface Props {
 		data: MonitorFormData;
@@ -26,6 +27,9 @@
 		/** A new monitor (the type can still be chosen) rather than an edit. Passed in,
 		 *  not read off `data` with instanceof: `data` is a plain reactive copy. */
 		isNew?: boolean;
+		/** The plan's fastest interval in seconds (#678); the server refuses faster. */
+		minInterval?: number;
+		planName?: string;
 	}
 
 	let {
@@ -33,7 +37,9 @@
 		availableZones = [],
 		availablePolicies = [],
 		errors = {},
-		isNew = false
+		isNew = false,
+		minInterval = 30,
+		planName = ''
 	}: Props = $props();
 
 	const capitalize = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
@@ -186,8 +192,17 @@
 	<label class="col-span-12 sm:col-span-6 block relative">
 		<span class="form-lbl">Interval (seconds)</span>
 		<input type="number" min="30" class="form-input mt-1 block w-full" bind:value={data.interval} />
-		<span class="block mt-1 text-xs form-hint">Minimum 30 seconds.</span>
-		{#if errors.interval}<span class="field-err">{errors.interval}</span>{/if}
+		<!-- The input's own min stays 30 (the schema floor): an older monitor may already
+		     run faster than the plan, and keeping its interval must still validate. -->
+		<!-- The refusal replaces the hint: both said the same thing one under the other. -->
+		<span class="block mt-1 text-xs form-hint" hidden={!!errors.interval}>
+			{#if minInterval > 30 && planName}
+				{minInterval} seconds or more on the {planName} plan (every {formatInterval(minInterval)}).
+			{:else}
+				Minimum {minInterval} seconds.
+			{/if}
+		</span>
+		{#if errors.interval}<span class="field-err field-err--flow">{errors.interval}</span>{/if}
 	</label>
 
 	{#if data.type === 'heartbeat'}

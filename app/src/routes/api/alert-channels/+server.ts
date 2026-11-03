@@ -8,6 +8,8 @@ import {
 import { failIfNoResponse, failIfNoUser } from '#lib/utils/api-utils.js';
 import { DefaultPageSize } from '#lib/constants.js';
 import { getApiErrors } from '#lib/utils/action-utils.js';
+import { getAccountPlan, planRefusal } from '#lib/server/plan.js';
+import { channelTypeAllowed, channelTypeMessage } from '#lib/plans.js';
 
 export const GET: RequestHandler = async ({ locals, url }) => {
 	failIfNoUser(locals);
@@ -40,6 +42,11 @@ export const POST: RequestHandler = async ({ locals, request }) => {
 	const validation = new AlertChannelItemValidator(data);
 	if (!validation.isValid) {
 		return validation.getInvalidDataResponse();
+	}
+
+	const { plan } = await getAccountPlan(locals.pb!, locals.user!);
+	if (!channelTypeAllowed(plan, data.type)) {
+		return planRefusal(channelTypeMessage(plan, data.type), 'type');
 	}
 
 	try {

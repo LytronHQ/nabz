@@ -4,7 +4,7 @@ import { test, expect } from '@playwright/test';
 // is gone they bind, so what they say must match production: the ap-southeast
 // probe runs in Singapore, and there is no self-service account deletion.
 
-for (const path of ['/privacy', '/terms']) {
+for (const path of ['/privacy', '/terms', '/refunds']) {
 	test(`${path} carries no draft banner`, async ({ page }) => {
 		await page.goto(path);
 		await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
@@ -38,4 +38,19 @@ test('the privacy policy names the real operator and its country', async ({ page
 	await expect(body).toContainText('operated from the United Kingdom');
 	await expect(body).not.toContainText('operated from the European Union');
 	await expect(body).toContainText('If you are in the UK');
+});
+
+// #682: the landing page reaches pricing and the legal pages, and the pricing page
+// says Pro is not on sale rather than offering a button that leads nowhere.
+test('pricing is linked from the landing page and says Pro is not on sale yet', async ({
+	page
+}) => {
+	await page.goto('/');
+	await page.getByRole('navigation').getByRole('link', { name: 'Pricing' }).click();
+	await expect(page).toHaveURL(/\/pricing$/);
+	await expect(page.getByRole('heading', { name: 'Pricing', level: 1 })).toBeVisible();
+	await expect(page.getByText(/Not on sale yet/)).toBeVisible();
+	await expect(page.getByRole('link', { name: 'Get Pro' })).toHaveCount(0);
+	await page.getByRole('link', { name: 'Refunds' }).click();
+	await expect(page.getByRole('heading', { name: 'Refund Policy', level: 1 })).toBeVisible();
 });

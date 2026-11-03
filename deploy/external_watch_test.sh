@@ -71,4 +71,17 @@ for target in monitors/1 monitors/2 monitors/3 heartbeats/7 heartbeats/8; do
   checked=$((checked+1))
 done
 [ "$checked" -eq 5 ] || fail "checked $checked of 5 resources"
+
+# A blip shorter than the confirmation period must not page (#661): Singapore
+# loses pb.nabz.sh for a minute or two with no customer impact.
+confirmed=0
+for target in monitors/2 monitors/3; do
+  body="$(grep -E "^PATCH https://uptime.betterstack.com/api/v2/${target} " "$LOG" | head -1)"
+  body="${body#* * }"
+  [ "$(jq -r '.confirmation_period' <<<"$body")" = 120 ] \
+    || fail "PATCH $target has no 2-minute confirmation period: $body"
+  confirmed=$((confirmed+1))
+done
+[ "$confirmed" -eq 2 ] || fail "checked $confirmed of 2 health monitors"
+echo "ok: the health monitors wait 2 minutes before opening an incident"
 echo "ok: external-watch.sh switches on all $checked monitors and heartbeats"

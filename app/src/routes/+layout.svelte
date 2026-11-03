@@ -5,6 +5,7 @@
 	import { Toaster } from '#lib/components/common/index.js';
 	import { UpdateBanner } from '#lib/components/common/update-banner/index.js';
 	import { afterNavigate } from '$app/navigation';
+	import { page } from '$app/state';
 	import { browser } from '$app/env';
 	import { onMount } from 'svelte';
 	import { watchThemeColor } from '#lib/utils/window-chrome.js';
@@ -12,6 +13,15 @@
 
 	let { data, children } = $props();
 	let { user } = $derived(data);
+	// A public status page (#679) looks the same to everyone: no app shell, even
+	// for a signed-in visitor, so an owner sees exactly what their customers see.
+	// /pricing and /tools (#682, #684) carry their own public header the same way.
+	let publicPage = $derived(
+		page.url.pathname.startsWith('/s/') ||
+			page.url.pathname === '/pricing' ||
+			page.url.pathname === '/tools' ||
+			page.url.pathname.startsWith('/tools/')
+	);
 
 	// Off-canvas sidebar drawer on small screens (#189). On desktop the sidebar is a
 	// static column; below the breakpoint it slides in over a backdrop, opened by the
@@ -59,7 +69,7 @@
 	<b>nabz</b>
 </div>
 
-{#if user}
+{#if user && !publicPage}
 	<div class="app-shell" class:nav-open={navOpen}>
 		<header class="app-topbar">
 			<button

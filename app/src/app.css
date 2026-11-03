@@ -1369,6 +1369,13 @@
 		font-size: 11.5px;
 		line-height: 1.2;
 	}
+	/* In the flow, for messages longer than one line (the plan refusals, #678):
+	   the absolute one ran over the next field's label at 390 px. */
+	.field-err.field-err--flow {
+		position: static;
+		display: block;
+		margin-top: 4px;
+	}
 }
 
 @media (prefers-reduced-motion: reduce) {

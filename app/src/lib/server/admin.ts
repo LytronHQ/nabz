@@ -8,6 +8,20 @@
 // different secret, no sharing.
 //
 // Pure (allowlist passed in) so it's unit-testable; callers pass env.ADMIN_EMAILS.
+
+// isAdminUser is the gate to use: the email must also be verified. Signup
+// accepts any address and verification is only requested, so an allowlisted
+// address nobody had registered yet was an admin to whoever signed up with it
+// first (#671).
+export function isAdminUser(
+	user: Record<string, unknown> | null | undefined,
+	adminEmailsCsv: string | undefined
+): boolean {
+	return (
+		user?.verified === true && typeof user.email === 'string' && isAdmin(user.email, adminEmailsCsv)
+	);
+}
+
 export function isAdmin(
 	email: string | null | undefined,
 	adminEmailsCsv: string | undefined

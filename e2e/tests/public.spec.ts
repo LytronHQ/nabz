@@ -23,7 +23,11 @@ for (const path of [
 	'/reset-password',
 	'/changelog',
 	'/privacy',
-	'/terms'
+	'/terms',
+	'/refunds',
+	'/pricing',
+	'/tools',
+	'/tools/website'
 ]) {
 	test(`public page ${path} renders without errors`, async ({ page }) => {
 		const errors: string[] = [];

@@ -21,6 +21,7 @@
 	import { friendlyMessage } from '#lib/utils/api-error-utils.js';
 	import { routeSaveError } from '#lib/utils/form-utils.js';
 
+	let { data } = $props();
 	let channels: AlertChannelsList | undefined = $state();
 	let addModal: Modal | undefined = $state();
 	let editModal: Modal | undefined = $state();
@@ -116,9 +117,9 @@
 </div>
 
 <Modal bind:this={addModal} title="Add alert channel" submitText="Add Channel" submit={submitAdd}>
-	<Form data={newItem} errors={addErrors} />
+	<Form data={newItem} errors={addErrors} allowedTypes={data.plan.channelTypes} />
 </Modal>
 
 <Modal bind:this={editModal} title="Update alert channel" submitText="Save" submit={submitEdit}>
-	<Form data={editItem} errors={editErrors} />
+	<Form data={editItem} errors={editErrors} allowedTypes={data.plan.channelTypes} />
 </Modal>

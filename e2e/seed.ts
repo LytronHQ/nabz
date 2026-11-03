@@ -12,6 +12,7 @@ const PB = process.env.E2E_PB || 'http://127.0.0.1:8390';
 const SU_EMAIL = process.env.E2E_SUPERUSER_EMAIL || 'admin@e2e.local';
 const SU_PASS = process.env.E2E_SUPERUSER_PASSWORD || 'e2e-superuser-pass';
 const USER_EMAIL = process.env.E2E_USER_EMAIL || 'user@e2e.local';
+const ADMIN_EMAIL = process.env.E2E_ADMIN_EMAIL || 'staff@e2e.local';
 const DAY_MS = 86_400_000;
 
 type Rec = { id: string } & Record<string, unknown>;
@@ -60,6 +61,26 @@ export async function seedStack(): Promise<void> {
 	);
 	const user = users.items?.[0]?.id as string | undefined;
 	if (!user) throw new Error(`seed: no ${USER_EMAIL}`);
+
+	// The shared accounts are on Pro (#678): the other specs add monitors at 30 s
+	// and every channel type, and many monitors pile up on them across specs. The
+	// plan limits themselves are tested on fresh accounts in plans.spec.ts.
+	for (const email of [USER_EMAIL, ADMIN_EMAIL]) {
+		const found = await call(
+			token,
+			'GET',
+			`/api/collections/users/records?perPage=1&filter=${encodeURIComponent(`email = "${email}"`)}`
+		);
+		const id = found.items?.[0]?.id as string | undefined;
+		if (!id) throw new Error(`seed: no ${email}`);
+		await findOrCreate(token, 'subscriptions', `user = "${id}"`, {
+			user: id,
+			plan: 'pro',
+			status: 'active',
+			source: 'admin',
+			note: 'e2e shared account'
+		});
+	}
 
 	// Long interval: data for pages to draw, not load for the worker.
 	const monitor = (name: string, path: string) =>

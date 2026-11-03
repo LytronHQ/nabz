@@ -158,8 +158,54 @@ else
   echo "==> no TUNNEL_TOKEN — not starting the Cloudflare Tunnel"
 fi
 
-echo "==> docker compose up (PocketBase — building pinned image)"
 cd "$APP_DIR"
+
+# A plain `up` recreates both connectors AT ONCE when their image changes
+# (measured with compose 5.5: both replicas stop, then both start), and with no
+# connector pb.nabz.sh is down for the web, check-ins and the public worker. So a
+# new cloudflared version rolls instead: start two connectors on the new image
+# beside the old ones, wait until each has registered with Cloudflare, then
+# remove the old ones. The `up` below then finds the new pair matching its
+# config and leaves it alone (#663, the eMudhra upgrade to 2026.10.3).
+roll_cloudflared() {
+  local dc=(docker compose -f deploy/pocketbase.yml --profile tunnel) want old new c
+  want="$("${dc[@]}" config --format json | jq -r '.services.cloudflared.image')"
+  old="$("${dc[@]}" ps -q cloudflared)"
+  [ -n "$old" ] || return 0 # first start: nothing to keep up
+  for c in $old; do
+    [ "$(docker inspect -f '{{.Config.Image}}' "$c")" = "$want" ] || break
+    c=""
+  done
+  [ -n "$c" ] || return 0 # every connector already runs $want
+  echo "==> rolling cloudflared to $want (old connectors stay up until the new ones register)"
+  "${dc[@]}" pull -q cloudflared
+  "${dc[@]}" up -d --no-deps --no-recreate --scale cloudflared=4 cloudflared
+  new="$(comm -13 <(sort <<<"$old") <("${dc[@]}" ps -q cloudflared | sort))"
+  [ "$(wc -w <<<"$new")" -eq 2 ] || { echo "expected 2 new connectors, got: $new"; exit 1; }
+  for c in $new; do
+    for _ in $(seq 1 45); do
+      docker logs "$c" 2>&1 | grep -q 'Registered tunnel connection' && break
+      sleep 2
+    done
+    docker logs "$c" 2>&1 | grep -q 'Registered tunnel connection' || {
+      # The old pair is still serving; take the unproven ones away and stop.
+      echo "new connector $c did not register within 90s; keeping the old ones"
+      docker logs --tail 20 "$c" 2>&1 | grep -v TUNNEL_TOKEN
+      docker rm -f $new
+      exit 1
+    }
+  done
+  echo "   new connectors registered; stopping the old ones gracefully"
+  # SIGTERM, not `rm -f`: cloudflared then stops taking new requests and drains
+  # the open ones for its 30 s grace period. Killed outright, the edge kept
+  # routing to it and /api/health answered 503 once mid-roll (#665). Docker's
+  # default 10 s would SIGKILL inside that grace period, hence 40.
+  docker stop -t 40 $old >/dev/null
+  docker rm $old >/dev/null
+}
+[ ${#COMPOSE_PROFILES_ARG[@]} -eq 0 ] || roll_cloudflared
+
+echo "==> docker compose up (PocketBase — building pinned image)"
 docker compose -f deploy/pocketbase.yml "${COMPOSE_PROFILES_ARG[@]}" up -d --build
 
 echo -n "==> waiting for PocketBase on ${PB_ADDR}:${PB_PORT} "
@@ -464,9 +510,38 @@ seed_app_user() { # email password label
   esac
 }
 
-echo "==> seeding default app users"
-seed_app_user "${SEED_ADMIN_EMAIL:-admin@nabz.sh}" "${SEED_PASSWORD:-demo1234}" "admin user"
-seed_app_user "${SEED_USER_EMAIL:-user@nabz.sh}"   "${SEED_PASSWORD:-demo1234}" "regular user"
+# The demo users carry a password that is written in this repo (and in the public
+# snapshot), so only the dev fleet may have them. Production seeded both on launch
+# day and kept them, claimable by whoever signed in first (#667). Off by default:
+# remote-deploy.sh turns it on for dev only. Where it is off, the two demo
+# addresses are deleted. Only those literal addresses: a configured
+# SEED_*_EMAIL may be a real person's account and is never removed.
+remove_demo_user() { # email
+  local email="$1" rec id code
+  rec="$(curl -fsS "http://${PB_ADDR}:${PB_PORT}/api/collections/users/records?perPage=1&skipTotal=true&filter=$(jq -rn --arg e "$email" '@uri "email=\"\($e)\""')" \
+    -H "Authorization: $TOKEN")" || { echo "   WARN: could not look up $email"; return 0; }
+  id="$(jq -r '.items[0].id // empty' <<<"$rec")"
+  [ -n "$id" ] || { echo "   $email absent"; return 0; }
+  code="$(curl -sS -o /tmp/pb_user_del.json -w '%{http_code}' \
+    "http://${PB_ADDR}:${PB_PORT}/api/collections/users/records/$id" -X DELETE -H "Authorization: $TOKEN")"
+  case "$code" in
+    204) echo "   deleted demo user $email (never signed in to: $(jq -r '.items[0].must_change_password' <<<"$rec"))";;
+    *)   echo "   WARN: deleting demo user $email got HTTP $code: $(cat /tmp/pb_user_del.json)";;
+  esac
+}
+
+app_users() {
+  if [ "${SEED_APP_USERS:-0}" = 1 ]; then
+    echo "==> seeding default app users"
+    seed_app_user "${SEED_ADMIN_EMAIL:-admin@nabz.sh}" "${SEED_PASSWORD:-demo1234}" "admin user"
+    seed_app_user "${SEED_USER_EMAIL:-user@nabz.sh}"   "${SEED_PASSWORD:-demo1234}" "regular user"
+  else
+    echo "==> demo app users are dev-only: removing any"
+    remove_demo_user admin@nabz.sh
+    remove_demo_user user@nabz.sh
+  fi
+}
+app_users
 
 # Account emails (#627): verification, password reset and email change link to
 # the web's own pages, not PocketBase's admin UI.

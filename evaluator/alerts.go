@@ -1,9 +1,13 @@
 package main
 
 import (
+	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"log"
+	"mime"
+	"net"
 	"net/smtp"
 	"os"
 	"slices"
@@ -330,12 +334,18 @@ func notifyRecoveries(pbClient *pb.Client, cfg alertConfig, now time.Time) {
 // processTestAlerts drains queued "send test alert" requests from the web UI,
 // delivering a clearly-labelled sample notification to the user's channels via
 // the same path as real alerts, and records the outcome for the UI to show.
+//
+// It runs on its own loop (runTestAlerts), never inside the evaluation pass, and
+// takes at most testAlertsPerTick oldest requests and one per user per tick
+// (#670): test alerts are on demand, so they must not be able to delay the
+// verdicts and alerts of every other tenant.
 func processTestAlerts(pbClient *pb.Client, cfg alertConfig) {
 	reqs, err := pbClient.GetPendingTestAlerts()
 	if err != nil {
 		log.Printf("Alerts: failed to list test alerts: %s", err)
 		return
 	}
+	reqs = fairTestAlerts(reqs, testAlertsPerTick)
 	for _, r := range reqs {
 		channels, err := pbClient.GetAlertChannels(r.User)
 		if err != nil {
@@ -365,6 +375,39 @@ func processTestAlerts(pbClient *pb.Client, cfg alertConfig) {
 			log.Printf("Alerts: [test %s] failed to record result: %s", r.Id, err)
 		}
 		logChannelEvents(pbClient, results, "test")
+	}
+}
+
+// testAlertsPerTick bounds one tick of the test-alert loop.
+const testAlertsPerTick = 5
+
+// fairTestAlerts keeps the oldest request per user, at most limit of them, in
+// queue order. The rest stay pending for the next tick.
+func fairTestAlerts(reqs []pb.TestAlert, limit int) []pb.TestAlert {
+	seen := map[string]bool{}
+	out := make([]pb.TestAlert, 0, limit)
+	for _, r := range reqs {
+		if len(out) == limit {
+			break
+		}
+		if seen[r.User] {
+			continue
+		}
+		seen[r.User] = true
+		out = append(out, r)
+	}
+	return out
+}
+
+// runTestAlerts serves test alerts on their own clock until ctx ends.
+func runTestAlerts(ctx context.Context, pbClient *pb.Client, cfg alertConfig, every time.Duration) {
+	for {
+		processTestAlerts(pbClient, cfg)
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(every):
+		}
 	}
 }
 
@@ -407,8 +450,19 @@ type deliveryResult struct {
 
 // dispatch delivers to each channel and returns the per-channel outcome.
 func dispatch(cfg alertConfig, channels []models.AlertChannel, subject, body string, payload map[string]interface{}) []deliveryResult {
-	results := make([]deliveryResult, 0, len(channels))
-	for _, ch := range channels {
+	// In parallel and under one deadline (#670): channels used to go one after
+	// another, each able to hold the evaluation pass for two minutes.
+	return runBounded(len(channels), dispatchDeadline,
+		func(i int) deliveryResult { return deliverOne(cfg, channels[i], subject, body, payload) },
+		func(i int) deliveryResult {
+			log.Printf("Alerts: channel %s not delivered within %s", channels[i].Id, dispatchDeadline)
+			return deliveryResult{Channel: channels[i], Outcome: "failed", Detail: errDispatchDeadline.Error()}
+		})
+}
+
+// deliverOne sends to one channel and reports the outcome.
+func deliverOne(cfg alertConfig, ch models.AlertChannel, subject, body string, payload map[string]interface{}) deliveryResult {
+	{
 		r := deliveryResult{Channel: ch, Outcome: "delivered"}
 		switch ch.Type {
 		case "webhook":
@@ -464,9 +518,8 @@ func dispatch(cfg alertConfig, channels []models.AlertChannel, subject, body str
 			log.Printf("Alerts: unknown channel type %q", ch.Type)
 			r.Outcome, r.Detail = "failed", "unknown channel type"
 		}
-		results = append(results, r)
+		return r
 	}
-	return results
 }
 
 // summarize reduces per-channel results to (sent, note) for the incident timeline
@@ -517,7 +570,7 @@ func deadmanCheck(pbClient *pb.Client, cfg alertConfig, silent map[string]bool, 
 	}
 
 	for _, z := range zones {
-		stale := isHeartbeatStale(z.Updated, now, cfg.deadman)
+		stale := isHeartbeatStale(z.Updated, now, silenceWindow(z.Zone, cfg))
 		switch {
 		case stale && !silent[z.Zone]:
 			log.Printf("ALERT: zone %q is silent (last heartbeat %s)", z.Zone, z.Updated)
@@ -548,6 +601,18 @@ func deadmanCheck(pbClient *pb.Client, cfg alertConfig, silent map[string]bool, 
 			store.Delete(stateKey(stateKindZoneSilent, z.Zone))
 		}
 	}
+}
+
+// silenceWindow is how long a zone may go without a heartbeat before the dead-man
+// calls it silent. The web's row is a 2-minute cron, not a 10 s zone beat: on the
+// zones' 90 s window a punctual beat read "silent" in nearly every cycle, ~700
+// times a day, each costing a blast-radius query (#656). It gets the same window
+// checkInPathState already judges it on.
+func silenceWindow(zone string, cfg alertConfig) time.Duration {
+	if zone == pb.WebZone {
+		return cfg.webBeat
+	}
+	return cfg.deadman
 }
 
 // certNeedsAlert reports whether a certificate expiring at expiresAt should warn
@@ -643,12 +708,14 @@ func httpErrDetail(provider string, res utils.HTTPResult) error {
 
 func sendWebhook(target string, payload map[string]interface{}) error {
 	body, _ := json.Marshal(payload)
-	res, err := utils.DoRequest("POST", target, body, "")
+	res, err := deliverPOST(target, body)
 	if err != nil {
 		return err
 	}
+	// Status only: echoing the body of an arbitrary address a user picked would
+	// hand that body back to them (#669). Known providers keep their reason text.
 	if res.StatusCode >= 300 {
-		return httpErrDetail("webhook", res)
+		return fmt.Errorf("webhook returned status %d", res.StatusCode)
 	}
 	return nil
 }
@@ -659,7 +726,7 @@ func sendSlack(target, subject, body string) error {
 	payload, _ := json.Marshal(map[string]interface{}{
 		"text": fmt.Sprintf("*%s*\n%s", subject, body),
 	})
-	res, err := utils.DoRequest("POST", target, payload, "")
+	res, err := deliverPOST(target, payload)
 	if err != nil {
 		return err
 	}
@@ -675,7 +742,7 @@ func sendDiscord(target, subject, body string) error {
 	payload, _ := json.Marshal(map[string]interface{}{
 		"content": fmt.Sprintf("**%s**\n%s", subject, body),
 	})
-	res, err := utils.DoRequest("POST", target, payload, "")
+	res, err := deliverPOST(target, payload)
 	if err != nil {
 		return err
 	}
@@ -717,7 +784,7 @@ func sendTelegram(botToken, chatID, subject, body string) error {
 		"chat_id": chatID,
 		"text":    fmt.Sprintf("%s\n%s", subject, body),
 	})
-	res, err := utils.DoRequest("POST", url, payload, "")
+	res, err := deliverPOST(url, payload)
 	if err != nil {
 		return err
 	}
@@ -760,7 +827,7 @@ func pagerDutyEvent(routingKey, subject, body, dedupKey, action string) map[stri
 // is the integration routing key.
 func sendPagerDuty(routingKey, subject, body, dedupKey, action string) error {
 	payload, _ := json.Marshal(pagerDutyEvent(routingKey, subject, body, dedupKey, action))
-	res, err := utils.DoRequest("POST", "https://events.pagerduty.com/v2/enqueue", payload, "")
+	res, err := deliverPOST("https://events.pagerduty.com/v2/enqueue", payload)
 	if err != nil {
 		return err
 	}
@@ -771,16 +838,66 @@ func sendPagerDuty(routingKey, subject, body, dedupKey, action string) error {
 	return nil
 }
 
-func sendEmail(cfg alertConfig, to, subject, body string) error {
-	addr := cfg.smtpHost + ":" + cfg.smtpPort
-	msg := fmt.Sprintf("From: %s\r\nTo: %s\r\nSubject: %s\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n%s",
-		cfg.smtpFrom, to, subject, body)
+// headerSafe keeps user text inside one header line: a monitor name with a line
+// break used to start new headers and replace the body of the alert email
+// (#670). Line breaks become spaces, and non-ASCII is MIME-encoded.
+func headerSafe(v string) string {
+	v = strings.Map(func(r rune) rune {
+		if r == '\r' || r == '\n' || r < 0x20 || r == 0x7f {
+			return ' '
+		}
+		return r
+	}, v)
+	return mime.QEncoding.Encode("utf-8", v)
+}
 
-	var auth smtp.Auth
-	if cfg.smtpUser != "" {
-		auth = smtp.PlainAuth("", cfg.smtpUser, cfg.smtpPass, cfg.smtpHost)
+// smtpTimeout bounds the whole SMTP exchange. net/smtp sets no deadline of its
+// own, so a relay that stalled would have held the evaluation pass.
+const smtpTimeout = 20 * time.Second
+
+func sendEmail(cfg alertConfig, to, subject, body string) error {
+	addr := net.JoinHostPort(cfg.smtpHost, cfg.smtpPort)
+	msg := fmt.Sprintf("From: %s\r\nTo: %s\r\nSubject: %s\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n%s",
+		headerSafe(cfg.smtpFrom), headerSafe(to), headerSafe(subject), body)
+
+	conn, err := net.DialTimeout("tcp", addr, smtpTimeout)
+	if err != nil {
+		return err
 	}
-	return smtp.SendMail(addr, auth, cfg.smtpFrom, []string{to}, []byte(msg))
+	_ = conn.SetDeadline(time.Now().Add(smtpTimeout))
+	c, err := smtp.NewClient(conn, cfg.smtpHost)
+	if err != nil {
+		conn.Close()
+		return err
+	}
+	defer c.Close()
+	if ok, _ := c.Extension("STARTTLS"); ok {
+		if err := c.StartTLS(&tls.Config{ServerName: cfg.smtpHost}); err != nil {
+			return err
+		}
+	}
+	if cfg.smtpUser != "" {
+		if err := c.Auth(smtp.PlainAuth("", cfg.smtpUser, cfg.smtpPass, cfg.smtpHost)); err != nil {
+			return err
+		}
+	}
+	if err := c.Mail(cfg.smtpFrom); err != nil {
+		return err
+	}
+	if err := c.Rcpt(to); err != nil {
+		return err
+	}
+	w, err := c.Data()
+	if err != nil {
+		return err
+	}
+	if _, err := w.Write([]byte(msg)); err != nil {
+		return err
+	}
+	if err := w.Close(); err != nil {
+		return err
+	}
+	return c.Quit()
 }
 
 // zoneBlastRadius counts what a zone going quiet costs, from what the evaluator

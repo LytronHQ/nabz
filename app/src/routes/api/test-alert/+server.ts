@@ -17,6 +17,26 @@ export const POST: RequestHandler = async ({ locals, request }) => {
 		channel = '';
 	}
 
+	// One at a time per user (#670): the evaluator works through test alerts a
+	// few per tick, and an unlimited queue let one account crowd out the rest.
+	try {
+		const pending = await locals.pb!.collection('test_alerts').getList(1, 1, {
+			filter: locals.pb!.filter('user = {:u} && status = "pending"', { u: userId })
+		});
+		if (pending.totalItems > 0) {
+			return Response.json(
+				{
+					done: false,
+					ok: false,
+					result: 'A test is already on its way. Try again in a few seconds.'
+				},
+				{ status: 429 }
+			);
+		}
+	} catch (err) {
+		console.warn('checking pending test alerts failed:', err);
+	}
+
 	let rec;
 	try {
 		rec = await locals

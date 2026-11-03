@@ -22,8 +22,10 @@ import { WEB_ZONE } from '#lib/server/health.js';
 // opens incidents and pages people for outages that are not happening.
 //
 // This endpoint writes a reserved `web` zone_stats row over exactly that path, on
-// a Cron Trigger. Fresh row => the path works, so silence really is the
-// customer's job not running. Stale row => the path is broken and every heartbeat
+// a Cron Trigger and, every minute, from the evaluator over the public URL: the
+// cron alone ran up to 102 minutes late (#656). Fresh row => the path works, so
+// silence really is the customer's job not running. Stale row => the path is
+// broken and every heartbeat
 // verdict is untrustworthy, so the evaluator holds them.
 //
 // It fails safe by construction: whatever breaks a real check-in breaks this

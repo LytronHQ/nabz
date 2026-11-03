@@ -2211,5 +2211,259 @@
       "CREATE UNIQUE INDEX `idx_alert_state_key` ON `alert_state` (`key`)"
     ],
     "id": "alertstate00001"
+  },
+  {
+    "id": "subscriptions01",
+    "name": "subscriptions",
+    "type": "base",
+    "system": false,
+    "listRule": "@request.auth.id = user.id || @request.auth.collectionName = \"service_accounts\"",
+    "viewRule": "@request.auth.id = user.id || @request.auth.collectionName = \"service_accounts\"",
+    "createRule": "@request.auth.collectionName = \"service_accounts\"",
+    "updateRule": "@request.auth.collectionName = \"service_accounts\"",
+    "deleteRule": "@request.auth.collectionName = \"service_accounts\"",
+    "fields": [
+      {
+        "hidden": false,
+        "presentable": false,
+        "required": true,
+        "system": true,
+        "autogeneratePattern": "[a-z0-9]{15}",
+        "id": "text_subsid001",
+        "max": 15,
+        "min": 15,
+        "name": "id",
+        "pattern": "^[a-z0-9]+$",
+        "primaryKey": true,
+        "type": "text"
+      },
+      {
+        "hidden": false,
+        "presentable": false,
+        "required": true,
+        "system": false,
+        "cascadeDelete": true,
+        "collectionId": "_pb_users_auth_",
+        "id": "subs_user0001",
+        "maxSelect": 1,
+        "minSelect": 0,
+        "name": "user",
+        "type": "relation"
+      },
+      {
+        "hidden": false,
+        "presentable": false,
+        "required": true,
+        "system": false,
+        "id": "subs_plan0001",
+        "maxSelect": 1,
+        "name": "plan",
+        "type": "select",
+        "values": [
+          "free",
+          "pro"
+        ]
+      },
+      {
+        "hidden": false,
+        "presentable": false,
+        "required": true,
+        "system": false,
+        "id": "subs_status01",
+        "maxSelect": 1,
+        "name": "status",
+        "type": "select",
+        "values": [
+          "active",
+          "past_due",
+          "canceled"
+        ]
+      },
+      {
+        "hidden": false,
+        "presentable": false,
+        "required": true,
+        "system": false,
+        "id": "subs_source01",
+        "maxSelect": 1,
+        "name": "source",
+        "type": "select",
+        "values": [
+          "admin",
+          "stripe"
+        ]
+      },
+      {
+        "hidden": false,
+        "presentable": false,
+        "required": false,
+        "system": false,
+        "id": "subs_period01",
+        "max": "",
+        "min": "",
+        "name": "current_period_end",
+        "type": "date"
+      },
+      {
+        "hidden": false,
+        "presentable": false,
+        "required": false,
+        "system": false,
+        "autogeneratePattern": "",
+        "id": "subs_note0001",
+        "max": 500,
+        "min": 0,
+        "name": "note",
+        "pattern": "",
+        "primaryKey": false,
+        "type": "text"
+      },
+      {
+        "hidden": false,
+        "presentable": false,
+        "required": false,
+        "system": false,
+        "id": "subs_created1",
+        "name": "created",
+        "onCreate": true,
+        "onUpdate": false,
+        "type": "autodate"
+      },
+      {
+        "hidden": false,
+        "presentable": false,
+        "required": false,
+        "system": false,
+        "id": "subs_updated1",
+        "name": "updated",
+        "onCreate": true,
+        "onUpdate": true,
+        "type": "autodate"
+      }
+    ],
+    "indexes": [
+      "CREATE UNIQUE INDEX `idx_subscriptions_user` ON `subscriptions` (`user`)"
+    ]
+  },
+  {
+    "id": "statuspages0001",
+    "name": "status_pages",
+    "type": "base",
+    "system": false,
+    "listRule": "@request.auth.id = user.id || @request.auth.collectionName = \"service_accounts\"",
+    "viewRule": "@request.auth.id = user.id || @request.auth.collectionName = \"service_accounts\"",
+    "createRule": "@request.auth.id = user.id",
+    "updateRule": "@request.auth.id = user.id",
+    "deleteRule": "@request.auth.id = user.id",
+    "fields": [
+      {
+        "hidden": false,
+        "presentable": false,
+        "required": true,
+        "system": true,
+        "autogeneratePattern": "[a-z0-9]{15}",
+        "id": "text_spid00001",
+        "max": 15,
+        "min": 15,
+        "name": "id",
+        "pattern": "^[a-z0-9]+$",
+        "primaryKey": true,
+        "type": "text"
+      },
+      {
+        "hidden": false,
+        "presentable": false,
+        "required": true,
+        "system": false,
+        "cascadeDelete": true,
+        "collectionId": "_pb_users_auth_",
+        "id": "sp_user000001",
+        "maxSelect": 1,
+        "minSelect": 0,
+        "name": "user",
+        "type": "relation"
+      },
+      {
+        "hidden": false,
+        "presentable": false,
+        "required": true,
+        "system": false,
+        "autogeneratePattern": "",
+        "id": "sp_title00001",
+        "max": 80,
+        "min": 1,
+        "name": "title",
+        "pattern": "",
+        "primaryKey": false,
+        "type": "text"
+      },
+      {
+        "hidden": false,
+        "presentable": false,
+        "required": true,
+        "system": false,
+        "autogeneratePattern": "",
+        "id": "sp_slug000001",
+        "max": 40,
+        "min": 3,
+        "name": "slug",
+        "pattern": "^[a-z0-9][a-z0-9-]*[a-z0-9]$",
+        "primaryKey": false,
+        "type": "text"
+      },
+      {
+        "hidden": false,
+        "presentable": false,
+        "required": false,
+        "system": false,
+        "autogeneratePattern": "",
+        "id": "sp_desc000001",
+        "max": 500,
+        "min": 0,
+        "name": "description",
+        "pattern": "",
+        "primaryKey": false,
+        "type": "text"
+      },
+      {
+        "hidden": false,
+        "presentable": false,
+        "required": false,
+        "system": false,
+        "cascadeDelete": false,
+        "collectionId": "monitors0000001",
+        "id": "sp_monitors01",
+        "maxSelect": 50,
+        "minSelect": 0,
+        "name": "monitors",
+        "type": "relation"
+      },
+      {
+        "hidden": false,
+        "presentable": false,
+        "required": false,
+        "system": false,
+        "id": "sp_created001",
+        "name": "created",
+        "onCreate": true,
+        "onUpdate": false,
+        "type": "autodate"
+      },
+      {
+        "hidden": false,
+        "presentable": false,
+        "required": false,
+        "system": false,
+        "id": "sp_updated001",
+        "name": "updated",
+        "onCreate": true,
+        "onUpdate": true,
+        "type": "autodate"
+      }
+    ],
+    "indexes": [
+      "CREATE UNIQUE INDEX `idx_status_pages_slug` ON `status_pages` (`slug`)",
+      "CREATE INDEX `idx_status_pages_user` ON `status_pages` (`user`)"
+    ]
   }
 ]

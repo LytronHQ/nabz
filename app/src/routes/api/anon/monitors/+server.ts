@@ -2,6 +2,7 @@ import type { RequestHandler } from '@sveltejs/kit';
 import { serviceClient } from '#lib/server/service-pb.js';
 import {
 	ANON_ALLOWED_TYPE,
+	ANON_MAX_LIVE,
 	ANON_MAX_PER_IP_PER_HOUR,
 	ANON_MAX_PER_SESSION,
 	ANON_MIN_INTERVAL,
@@ -78,6 +79,29 @@ export const POST: RequestHandler = async ({ request, locals, cookies, getClient
 			session: token,
 			ip_hash: ipHash
 		});
+
+		// Count again now that this row exists, and give it back if the network or
+		// the whole trial is over its limit (#671). The count above happens before
+		// the insert, so parallel requests all passed it; counting after the insert
+		// means each one sees the others, and they can only err towards refusing.
+		const [mineNow, live] = await Promise.all([
+			pb.collection('anon_monitors').getList(1, 1, {
+				filter: pb.filter('ip_hash = {:h} && created >= {:since}', { h: ipHash, since })
+			}),
+			pb.collection('anon_monitors').getList(1, 1, {})
+		]);
+		if (mineNow.totalItems > ANON_MAX_PER_IP_PER_HOUR || live.totalItems > ANON_MAX_LIVE) {
+			await pb.collection('anon_monitors').delete(created.id);
+			const busy = live.totalItems > ANON_MAX_LIVE;
+			return Response.json(
+				{
+					error: busy
+						? 'The trial is busy right now — try again later, or sign up.'
+						: 'Too many trial monitors from your network right now — try later, or sign up.'
+				},
+				{ status: 429 }
+			);
+		}
 
 		if (isNewSession) setAnonCookie(cookies, token);
 		return Response.json({ id: created.id }, { status: 201 });

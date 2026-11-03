@@ -197,7 +197,7 @@ pocketbase_env() {
   kv PB_BIND_IP            "${PB_BIND_IP:-}"
   kv PRIVATE_SUBNET        "${PRIVATE_SUBNET:-}"
   kv TUNNEL_TOKEN          "${TUNNEL_TOKEN:-}"
-  kv CLOUDFLARED_VERSION   "${CLOUDFLARED_VERSION:-2026.8.2}"
+  kv CLOUDFLARED_VERSION   "${CLOUDFLARED_VERSION:-2026.10.3}"
   kv PB_LOGS_MIN_LEVEL     "${PB_LOGS_MIN_LEVEL:-4}"
   kv SEED_WORKER_USERNAME     "${WORKER_PB_USERNAME:-}"
   kv SEED_WORKER_PASSWORD     "${WORKER_PB_PASSWORD:-}"
@@ -205,8 +205,11 @@ pocketbase_env() {
   kv SEED_EVALUATOR_PASSWORD  "${EVALUATOR_PB_PASSWORD:-}"
   # Default APP users (#392) — ordinary users, not service accounts. Seeded with a
   # shared password and must_change_password=true, so it cannot survive first
-  # sign-in. Existing records are never touched by a re-run.
-  kv SEED_ADMIN_EMAIL      "${SEED_ADMIN_EMAIL:-admin@nabz.sh}"
+  # sign-in. Existing records are never touched by a re-run. Dev only: the
+  # password is public, and elsewhere the first stranger to sign in claims the
+  # account (#667); other environments delete them.
+  kv SEED_APP_USERS        "$([ "$ENV_NAME" = dev ] && echo 1 || echo 0)"
+  kv SEED_ADMIN_EMAIL     "${SEED_ADMIN_EMAIL:-admin@nabz.sh}"
   kv SEED_USER_EMAIL       "${SEED_USER_EMAIL:-user@nabz.sh}"
   kv SEED_PASSWORD         "${SEED_PASSWORD:-demo1234}"
   # Sign in with GitHub / Google (#609), from Bitwarden. Optional: a provider
@@ -312,9 +315,10 @@ PB_ADMIN_USERNAME=${WORKER_PB_USERNAME:?set WORKER_PB_USERNAME in $ENV_FILE}
 PB_ADMIN_PASSWORD=${WORKER_PB_PASSWORD:?set WORKER_PB_PASSWORD in $ENV_FILE}
 REGION_NAME=${1}
 PRIVATE_SUBNET=${subnet}
-# The anonymous "free" zone runs untrusted URLs, so it enforces the SSRF guard
-# (#268); real zones leave it off. Empty here = off (worker.yml default).
-BLOCK_PRIVATE_TARGETS=$([ "${1}" = "free" ] && echo true)
+# Every zone runs user-chosen targets, so the private-destination guard is on
+# everywhere (#669). Only the dev fleet, whose targets include lab hosts on the
+# private network, opts out.
+ALLOW_PRIVATE_TARGETS=$([ "$ENV_NAME" = dev ] && echo true)
 HEALTH_DEBUG_TOKEN=${HEALTH_DEBUG_TOKEN:-}
 # A range, not a single port (#311): N replicas on one node each need their own
 # host port, and a fixed one allows exactly one container.
@@ -395,11 +399,14 @@ SMTP_USERNAME=${SMTP_USERNAME:-}
 SMTP_PASSWORD=${SMTP_PASSWORD:-}
 SMTP_FROM=${SMTP_FROM:-}
 OPS_WEBHOOK_URL=${OPS_WEBHOOK_URL:-}
+# Alerts go to user-chosen addresses; refused when private except on dev (#669).
+ALLOW_PRIVATE_TARGETS=$([ "$ENV_NAME" = dev ] && echo true)
 HEALTHCHECK_PING_URL=${HEALTHCHECK_PING_URL:-}
 DEADMAN_SECONDS=${DEADMAN_SECONDS:-90}
 CERT_EXPIRY_WARN_DAYS=${CERT_EXPIRY_WARN_DAYS:-14}
 PRIVATE_SUBNET=${PRIVATE_SUBNET:-}
 HEALTH_DEBUG_TOKEN=${HEALTH_DEBUG_TOKEN:-}
+WEB_URL=${WEB_URL:-}
 HEALTH_PORT=${HEALTH_PORT:-8080}
 VAPID_PUBLIC_KEY=${VAPID_PUBLIC_KEY:-}
 VAPID_PRIVATE_KEY=${VAPID_PRIVATE_KEY:-}

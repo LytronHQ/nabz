@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log"
@@ -14,7 +15,9 @@ import (
 )
 
 const (
-	evalInterval         = 10 * time.Second
+	evalInterval = 10 * time.Second
+	// testAlertInterval paces the test-alert loop, which runs beside the pass.
+	testAlertInterval    = 3 * time.Second
 	consecutiveThreshold = 2
 	defaultInterval      = 60
 	minFreshWindowSecs   = 30
@@ -75,6 +78,17 @@ func main() {
 		log.Printf("Healthcheck ping enabled (at most every %s)", pingInterval)
 	}
 
+	// Drives the check-in path beat the Cron Trigger alone kept missing (#656).
+	if beater := newWebBeater(webBeatConfig()); beater != nil {
+		log.Printf("Web liveness beat enabled (every %s)", webBeatInterval)
+		go beater.run(context.Background(), webBeatInterval)
+	} else {
+		log.Printf("Web liveness beat off: WEB_URL or HEALTH_DEBUG_TOKEN is unset")
+	}
+
+	// Test alerts run beside the evaluation pass, not inside it (#670).
+	go runTestAlerts(context.Background(), pbClient, alertCfg, testAlertInterval)
+
 	log.Println("Evaluator ready.")
 	for {
 		now := time.Now().UTC()
@@ -90,7 +104,6 @@ func main() {
 		runOnce(pbClient, alertCfg, pathDown, unjudged, alertState)
 		processEscalations(pbClient, alertCfg, now)
 		notifyRecoveries(pbClient, alertCfg, now)
-		processTestAlerts(pbClient, alertCfg)
 		deadmanCheck(pbClient, alertCfg, silentZones, alertState, now)
 		certExpiryCheck(pbClient, alertCfg, certAlerted, alertState, now)
 		domainRefreshCheck(pbClient, &domainRefresh, now)

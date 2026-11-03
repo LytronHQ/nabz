@@ -12,6 +12,7 @@
 		| 'escalations'
 		| 'dependencies'
 		| 'usage'
+		| 'status'
 		| 'signout';
 </script>
 
@@ -43,6 +44,9 @@
 			d: '<circle cx="5" cy="5" r="2.5"/><circle cx="5" cy="19" r="2.5"/><circle cx="19" cy="12" r="2.5"/><path d="M7.3 6.1l9.4 4.8M7.3 17.9l9.4-4.8"/>'
 		},
 		usage: { d: '<path d="M4 20V12M9.3 20V7M14.7 20v-9M20 20V5"/><path d="M3 20h18"/>' },
+		status: {
+			d: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9h2M7 13h2M12 9h5M12 13h5M7 17h10"/>'
+		},
 		signout: {
 			d: '<path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><path d="M16 17l5-5-5-5M21 12H9"/>'
 		}

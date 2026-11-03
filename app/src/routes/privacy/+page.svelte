@@ -2,7 +2,7 @@
 	import LegalPage from '#lib/components/legal/legal-page.svelte';
 </script>
 
-<LegalPage title="Privacy Policy" lastUpdated="2026-10-19">
+<LegalPage title="Privacy Policy" lastUpdated="2026-11-03">
 	<h2>Who we are</h2>
 	<p>
 		nabz ("we", "us") is an uptime-monitoring service run by Lytron Systems Ltd and operated from
@@ -65,6 +65,13 @@
 		<li>
 			<strong>MailerSend</strong> — sending transactional and alert email (account verification, password
 			resets, and your incident alerts).
+		</li>
+		<li>
+			<strong>Stripe</strong> — only once Pro is on sale, and only if you subscribe. Stripe is the merchant
+			of record through Stripe Managed Payments: it takes the payment, is liable for sales tax and VAT,
+			issues your invoice, and handles refunds and disputes. It is a separate controller for your payment
+			details, which it collects on its own checkout page; we never see them and receive only a subscription
+			status and a reference. Until Pro is on sale, no data goes to Stripe.
 		</li>
 		<li>
 			<strong>GitHub and Google</strong> — only if you sign in with one of them. You sign in on their

@@ -8,3 +8,7 @@ deploy/.materialized/
 
 # A vitest/npx run from the repo root (rather than app/) creates one here.
 node_modules/
+
+# impeccable: per-developer consent and the hook cache stay local
+.impeccable/config.local.json
+.impeccable/hook.cache.json

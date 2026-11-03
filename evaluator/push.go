@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"time"
 	"unicode/utf8"
 
 	webpush "github.com/SherClockHolmes/webpush-go"
@@ -22,7 +21,9 @@ const pushTTL = 6 * 60 * 60
 // accept (Apple rejects more with PayloadTooLarge).
 const pushBodyMax = 1000
 
-var pushHTTPClient = &http.Client{Timeout: 15 * time.Second}
+// pushHTTPClient shares deliveryClient's guard: a push endpoint is an address
+// the browser handed us, which a user can replace with any https URL (#669).
+var pushHTTPClient = &http.Client{Timeout: deliveryTimeout, Transport: deliveryClient.Transport, CheckRedirect: deliveryClient.CheckRedirect}
 
 // pushMessage is what the service worker's push handler reads to show the
 // notification. Every push must show one: Safari revokes the permission of a

@@ -156,7 +156,7 @@ the product requires them. `deploy/README.md` describes what they do.
 - **App** (SvelteKit): `vitest` unit tests — `cd app && npm test` (or `npm run test:unit` for units only).
 - **Go** (`corelib` / `worker` / `evaluator`): `go test ./...` in each module.
 
-**CI** ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs both suites with coverage on every PR and push — a failing test fails the build, and the per-suite coverage lands in the run's job summary. On merge to `main`, CI recomputes coverage and refreshes the **shields.io badges** at the top of this README (the repo is private, so shields can't read a live data source — the numbers are baked into static badges, updated in place). Regenerate them locally with `./scripts/coverage.sh --write`, or just print the numbers with `./scripts/coverage.sh`.
+**CI** ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs both suites with coverage on every PR, and on every push to `main` whose exact tree a PR run has not already passed — a failing test fails the build, and the per-suite coverage lands in the run's job summary. Each run also compares its coverage with the static **shields.io badges** at the top of this README and warns when they no longer match. Regenerate them with `./scripts/coverage.sh --write` in a PR, or just print the numbers with `./scripts/coverage.sh`.
 
 Coverage is reported per module by that workflow; the app figure is unit-test coverage of `src/`, and is honest-over-aspirational — most server/route + SSR paths are exercised by integration and manual dev verification rather than vitest units, so the headline is deliberately low rather than inflated.
 

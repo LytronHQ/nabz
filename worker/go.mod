@@ -1,6 +1,6 @@
 module monitors/worker
 
-go 1.22.5
+go 1.26.0
 
 replace monitors/corelib => ../corelib
 
