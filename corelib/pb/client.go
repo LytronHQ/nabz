@@ -1,22 +1,22 @@
 package pb
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"monitors/corelib/models"
 	"monitors/corelib/utils"
 )
 
-// Client is a stateful PocketBase client. It holds an admin token and refreshes
-// it automatically when the server returns 401, so a long-running worker keeps
-// working across token expiry instead of silently failing (the old code fetched
-// the token once at startup).
+// Client is a stateful PocketBase client. It holds a service-account token and
+// renews it before it expires, so a long-running worker keeps its identity.
 type Client struct {
 	baseURL    string
 	collection string
@@ -27,9 +27,22 @@ type Client struct {
 	// network. Empty inside the private network, where Access is not in the path.
 	access map[string]string
 
-	mu    sync.RWMutex
-	token string
+	mu      sync.RWMutex
+	token   string
+	renewAt time.Time
+	// renewing lets one goroutine log in while the others carry on with the
+	// current token, which is still valid at that point.
+	renewing atomic.Bool
 }
+
+var (
+	// renewRetryDelay spaces out login attempts after a failed renewal. A var so a
+	// test can retry at once.
+	renewRetryDelay = time.Minute
+)
+
+// renewWithoutExpiry is how long to keep a token whose expiry cannot be read.
+const renewWithoutExpiry = time.Hour
 
 // NewClient creates a client and performs the initial authentication.
 func NewClient(config models.Config) (*Client, error) {
@@ -118,8 +131,56 @@ func (c *Client) authenticate() error {
 
 	c.mu.Lock()
 	c.token = parsed.Token
+	c.renewAt = tokenRenewAt(parsed.Token, time.Now())
 	c.mu.Unlock()
 	return nil
+}
+
+// tokenRenewAt picks when to replace a token: halfway through its life, read from
+// its own exp claim so a change to the collection's token duration needs no change
+// here. The claim is only a schedule, so an unverified read is enough.
+func tokenRenewAt(token string, now time.Time) time.Time {
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		return now.Add(renewWithoutExpiry)
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return now.Add(renewWithoutExpiry)
+	}
+	var claims struct {
+		Exp int64 `json:"exp"`
+	}
+	if err := json.Unmarshal(raw, &claims); err != nil || claims.Exp == 0 {
+		return now.Add(renewWithoutExpiry)
+	}
+	life := time.Unix(claims.Exp, 0).Sub(now)
+	if life <= 0 {
+		return now.Add(renewRetryDelay)
+	}
+	return now.Add(life / 2)
+}
+
+// renewIfDue replaces the token before it expires. Waiting for a 401 does not
+// work: PocketBase treats an expired token as no token, so lists answer 200 with
+// no items and creates answer 400. On 2026-11-08 every node went anonymous 5 days
+// after its restart and monitoring stopped without one 401 (#711).
+func (c *Client) renewIfDue() {
+	c.mu.RLock()
+	// A zero renewAt is a client that never logged in, so it has nothing to renew.
+	due := !c.renewAt.IsZero() && !time.Now().Before(c.renewAt)
+	c.mu.RUnlock()
+	if !due || !c.renewing.CompareAndSwap(false, true) {
+		return
+	}
+	defer c.renewing.Store(false)
+
+	if err := c.authenticate(); err != nil {
+		log.Printf("PocketBase: token renewal failed (%s) — retrying in %s", err, renewRetryDelay)
+		c.mu.Lock()
+		c.renewAt = time.Now().Add(renewRetryDelay)
+		c.mu.Unlock()
+	}
 }
 
 func (c *Client) getToken() string {
@@ -128,8 +189,11 @@ func (c *Client) getToken() string {
 	return c.token
 }
 
-// request performs an authenticated request, refreshing the token once on a 401.
+// request performs an authenticated request. The token is renewed ahead of expiry
+// (renewIfDue); the 401 path covers a token revoked early, for example when the
+// account's password changes.
 func (c *Client) request(method, path string, body []byte) (utils.HTTPResult, error) {
+	c.renewIfDue()
 	res, err := utils.DoRequestWithHeaders(method, c.baseURL+path, body, c.getToken(), c.access)
 	if err != nil {
 		return res, err

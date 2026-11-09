@@ -2,6 +2,12 @@
 
 Notable changes to nabz. Newest first.
 
+## v0.13.6
+
+_2026-11-09_
+
+- **Monitoring no longer stops when an internal login expires** — on 8 November checks and alerts stopped for about nine hours because the probes' login to the database ran out after five days and was not renewed. Logins are now renewed well before they expire.
+
 ## v0.13.5
 
 _2026-11-03_
